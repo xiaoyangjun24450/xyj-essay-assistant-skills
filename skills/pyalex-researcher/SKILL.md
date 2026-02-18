@@ -21,6 +21,33 @@ This skill provides a workflow and script for:
 2. Filtering results by publication year, language, citation count, etc.
 3. Generating formatted references in GB/T 7714-2015 (Chinese academic standard)
 
+## ⚠️ IMPORTANT RULES - MUST FOLLOW
+
+### Rule 0: ULTIMATE RULE - References Are Sacred (参考文献神圣不可侵犯)
+
+**When handling any request involving "references," the utmost rigor and integrity must be maintained:**
+
+🚫 **ABSOLUTELY PROHIBITED ACTIONS (Under ANY circumstances)**:
+- **Never fabricate any bibliographic information** - Not even if the format appears perfectly compliant
+- **Never guess or "reasonably infer" reference details** - Including authors, titles, journals, years, page numbers, etc.
+- **Never use "format examples" to impersonate real references** - Format demonstrations must never be presented as actual search results
+- **Never duplicate existing references and modify numbering or details** - Each reference must be unique and authentic
+
+✅ **MANDATORY PRINCIPLES TO FOLLOW**:
+1. **Only present verified data from database/API responses** - Every reference must have a legitimate source
+2. **Report search results accurately** - Present exactly what was found; clearly state limitations when results are insufficient
+3. **Clearly distinguish between "format examples" and "real data"** - Examples must be explicitly labeled and never confused with actual results
+4. **Provide alternative solutions when data is unavailable** - Direct users to other databases (CNKI, Wanfang, etc.) for further research
+
+> ⚠️ **CRITICAL WARNING**: Fabricating references constitutes academic misconduct and severely damages user credibility. Even when search results yield zero findings, it is **absolutely forbidden** to invent references to meet quotas.
+
+### Rule 1: Verify Before Presenting (展示前验证)
+
+Before presenting any references to users, verification is mandatory:
+- Confirm every reference originates authentically from OpenAlex API responses
+- Ensure reference formatting complies with GB/T 7714-2015 standards
+- Maintain sequential numbering without duplicates or omissions
+
 ## Features
 
 - **Smart Search**: Uses OpenAlex's powerful search to find relevant papers
@@ -152,12 +179,14 @@ for ref in all_refs[:5]:
 python demo_reference_search.py
 ```
 
-Output:
+Output (示例输出格式，实际结果以 API 返回为准):
 ```
-[1] Zhang S, Li M. Sensorless FOC Control of PMSM Based on ESP32[J]. IEEE Transactions on Industrial Electronics, 2023, 70(5): 4567-4576.
-[2] Wang H, et al. Design of FOC Controller for BLDC Motor Using ESP32[J]. IEEE Access, 2022, 10: 12345-12356.
+[1] Author A, Author B. Actual Paper Title from OpenAlex[J]. Journal Name, Year, Vol(Issue): Pages.
+[2] Author C, et al. Another Real Paper Title[J]. Journal Name, Year, Vol(Issue): Pages.
 ...
 ```
+
+> ⚠️ 注意：以上仅为格式示例，实际使用时必须输出 OpenAlex API 返回的真实文献数据。
 
 ### Example 2: Multiple Topic Search
 
