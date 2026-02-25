@@ -21,6 +21,7 @@ import struct
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
+from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
@@ -57,7 +58,8 @@ EMU_PER_CM = 360000
 class LatexToOmmlConverter:
     """Convert LaTeX math expressions to OMML XML elements."""
 
-    def __init__(self):
+    def __init__(self, font_hint: str = 'eastAsia'):
+        self._font_hint = font_hint
         self.greek_map = {
             'alpha': 'α', 'beta': 'β', 'gamma': 'γ', 'delta': 'δ',
             'epsilon': 'ε', 'zeta': 'ζ', 'eta': 'η', 'theta': 'θ',
@@ -68,25 +70,39 @@ class LatexToOmmlConverter:
             'Gamma': 'Γ', 'Delta': 'Δ', 'Theta': 'Θ', 'Lambda': 'Λ',
             'Xi': 'Ξ', 'Pi': 'Π', 'Sigma': 'Σ', 'Phi': 'Φ',
             'Psi': 'Ψ', 'Omega': 'Ω',
+            'cdot': '⋅', 'times': '×', 'pm': '±', 'mp': '∓',
+            'leq': '≤', 'geq': '≥', 'neq': '≠', 'approx': '≈',
+            'infty': '∞', 'partial': '∂', 'nabla': '∇',
+            'sum': '∑', 'prod': '∏', 'int': '∫',
+            'rightarrow': '→', 'leftarrow': '←', 'Rightarrow': '⇒',
+            'ldots': '…', 'dots': '…',
+        }
+        self._accent_map = {
+            'hat': '\u0302', 'tilde': '\u0303', 'bar': '\u0304',
+            'vec': '\u20d7', 'dot': '\u0307', 'ddot': '\u0308',
         }
 
     def _ctrl_pr(self):
         ctrlPr = ET.Element(f'{NS_M}ctrlPr')
         rPr = ET.SubElement(ctrlPr, f'{NS_W}rPr')
         rFonts = ET.SubElement(rPr, f'{NS_W}rFonts')
-        rFonts.set(f'{NS_W}hint', 'eastAsia')
+        if self._font_hint:
+            rFonts.set(f'{NS_W}hint', self._font_hint)
         rFonts.set(f'{NS_W}ascii', 'Cambria Math')
         rFonts.set(f'{NS_W}hAnsi', 'Cambria Math')
         return ctrlPr
 
-    def _math_run(self, text, hint='default'):
+    def _math_run(self, text, hint=None):
+        if hint is None:
+            hint = 'default'
         r = ET.Element(f'{NS_M}r')
         rPr = ET.SubElement(r, f'{NS_M}rPr')
         sty = ET.SubElement(rPr, f'{NS_M}sty')
         sty.set(f'{NS_M}val', 'p')
         wrPr = ET.SubElement(r, f'{NS_W}rPr')
         rFonts = ET.SubElement(wrPr, f'{NS_W}rFonts')
-        rFonts.set(f'{NS_W}hint', hint)
+        if hint:
+            rFonts.set(f'{NS_W}hint', hint)
         rFonts.set(f'{NS_W}ascii', 'Cambria Math')
         rFonts.set(f'{NS_W}hAnsi', 'Cambria Math')
         t = ET.SubElement(r, f'{NS_M}t')
@@ -94,7 +110,7 @@ class LatexToOmmlConverter:
         return r
 
     def _math_run_ea(self, text):
-        return self._math_run(text, hint='eastAsia')
+        return self._math_run(text, hint=self._font_hint or 'eastAsia')
 
     # ------------------------------------------------------------------
 
@@ -188,7 +204,65 @@ class LatexToOmmlConverter:
                 self._parse_expr(parent, rest)
             return
 
-        # 5. Fractions \frac{a}{b}
+        # 5a. Accents: \hat{x}, \tilde{x}, \bar{x}, etc.
+        m = re.match(r'\\(hat|tilde|bar|vec|dot|ddot)\{([^}]+)\}', expr)
+        if not m:
+            m = re.match(r'\\(hat|tilde|bar|vec|dot|ddot)\s+([a-zA-Z])', expr)
+        if m:
+            rest = expr[m.end():]
+            m_sub = re.match(r'_\{([^}]+)\}', rest) if rest else None
+            if not m_sub and rest:
+                m_sub = re.match(r'_([a-zA-Z0-9])', rest)
+            m_sup = re.match(r'\^\{([^}]+)\}', rest) if rest else None
+            if not m_sup and rest:
+                m_sup = re.match(r'\^([a-zA-Z0-9])', rest)
+            if m_sub:
+                sub_el = ET.SubElement(parent, f'{NS_M}sSub')
+                pr = ET.SubElement(sub_el, f'{NS_M}sSubPr')
+                pr.append(self._ctrl_pr())
+                base = ET.SubElement(sub_el, f'{NS_M}e')
+                self._build_accent(base, m.group(2), self._accent_map[m.group(1)])
+                base.append(self._ctrl_pr())
+                sub = ET.SubElement(sub_el, f'{NS_M}sub')
+                self._parse_expr(sub, m_sub.group(1))
+                sub.append(self._ctrl_pr())
+                rest = rest[m_sub.end():]
+            elif m_sup:
+                sup_el = ET.SubElement(parent, f'{NS_M}sSup')
+                pr = ET.SubElement(sup_el, f'{NS_M}sSupPr')
+                pr.append(self._ctrl_pr())
+                base = ET.SubElement(sup_el, f'{NS_M}e')
+                self._build_accent(base, m.group(2), self._accent_map[m.group(1)])
+                base.append(self._ctrl_pr())
+                sup = ET.SubElement(sup_el, f'{NS_M}sup')
+                self._parse_expr(sup, m_sup.group(1))
+                sup.append(self._ctrl_pr())
+                rest = rest[m_sup.end():]
+            else:
+                self._build_accent(parent, m.group(2), self._accent_map[m.group(1)])
+            if rest:
+                self._parse_expr(parent, rest)
+            return
+
+        # 5b. \text{...} — regular text in math
+        m = re.match(r'\\text\{([^}]+)\}', expr)
+        if m:
+            parent.append(self._math_run(m.group(1)))
+            rest = expr[m.end():]
+            if rest:
+                self._parse_expr(parent, rest)
+            return
+
+        # 5c. \sqrt{x} — square root
+        m = re.match(r'\\sqrt\{([^}]+)\}', expr)
+        if m:
+            self._build_radical(parent, m.group(1))
+            rest = expr[m.end():]
+            if rest:
+                self._parse_expr(parent, rest)
+            return
+
+        # 6. Fractions \frac{a}{b}
         m = re.match(r'\\frac\{([^}]+)\}\{([^}]+)\}', expr)
         if m:
             f = ET.SubElement(parent, f'{NS_M}f')
@@ -224,7 +298,7 @@ class LatexToOmmlConverter:
                     self._parse_expr(parent, rest)
                 return
 
-        # 7. Subscript
+        # 7. Subscript (with optional trailing superscript → sSubSup)
         sub_pats = [
             r'\\([a-zA-Z]+)_\{([^}]+)\}',
             r'\\([a-zA-Z]+)_([a-zA-Z0-9])',
@@ -235,13 +309,20 @@ class LatexToOmmlConverter:
         for pat in sub_pats:
             m = re.match(pat, expr)
             if m:
-                self._build_sub(parent, m.group(1), m.group(2))
                 rest = expr[m.end():]
+                m2 = re.match(r'\^\{([^}]+)\}', rest) if rest else None
+                if not m2 and rest:
+                    m2 = re.match(r'\^([a-zA-Z0-9*])', rest)
+                if m2:
+                    self._build_subsup(parent, m.group(1), m.group(2), m2.group(1))
+                    rest = rest[m2.end():]
+                else:
+                    self._build_sub(parent, m.group(1), m.group(2))
                 if rest:
                     self._parse_expr(parent, rest)
                 return
 
-        # 8. Superscript
+        # 8. Superscript (with optional trailing subscript → sSubSup)
         sup_pats = [
             r'\\([a-zA-Z]+)\^\{([^}]+)\}',
             r'\\([a-zA-Z]+)\^([a-zA-Z0-9*])',
@@ -251,8 +332,15 @@ class LatexToOmmlConverter:
         for pat in sup_pats:
             m = re.match(pat, expr)
             if m:
-                self._build_sup(parent, m.group(1), m.group(2))
                 rest = expr[m.end():]
+                m2 = re.match(r'_\{([^}]+)\}', rest) if rest else None
+                if not m2 and rest:
+                    m2 = re.match(r'_([a-zA-Z0-9])', rest)
+                if m2:
+                    self._build_subsup(parent, m.group(1), m2.group(1), m.group(2))
+                    rest = rest[m2.end():]
+                else:
+                    self._build_sup(parent, m.group(1), m.group(2))
                 if rest:
                     self._parse_expr(parent, rest)
                 return
@@ -267,7 +355,7 @@ class LatexToOmmlConverter:
             return
 
         # 10. Operators & symbols
-        if expr[0] in '=+-*/()[]{},;: ':
+        if expr[0] in '=+-*/()[]{},;: |!<>~':
             parent.append(self._math_run(expr[0]))
             if len(expr) > 1:
                 self._parse_expr(parent, expr[1:])
@@ -320,6 +408,27 @@ class LatexToOmmlConverter:
                 ec.append(self._ctrl_pr())
         e.append(self._ctrl_pr())
         d.append(self._ctrl_pr())
+
+    def _build_accent(self, parent, content, accent_char):
+        acc = ET.SubElement(parent, f'{NS_M}acc')
+        accPr = ET.SubElement(acc, f'{NS_M}accPr')
+        chrEl = ET.SubElement(accPr, f'{NS_M}chr')
+        chrEl.set(f'{NS_M}val', accent_char)
+        accPr.append(self._ctrl_pr())
+        e = ET.SubElement(acc, f'{NS_M}e')
+        self._parse_expr(e, content)
+        e.append(self._ctrl_pr())
+
+    def _build_radical(self, parent, content):
+        rad = ET.SubElement(parent, f'{NS_M}rad')
+        radPr = ET.SubElement(rad, f'{NS_M}radPr')
+        ET.SubElement(radPr, f'{NS_M}degHide').set(f'{NS_M}val', '1')
+        radPr.append(self._ctrl_pr())
+        deg = ET.SubElement(rad, f'{NS_M}deg')
+        deg.append(self._ctrl_pr())
+        e = ET.SubElement(rad, f'{NS_M}e')
+        self._parse_expr(e, content)
+        e.append(self._ctrl_pr())
 
     def _build_subsup(self, parent, base, sub_val, sup_val):
         el = ET.SubElement(parent, f'{NS_M}sSubSup')
@@ -454,6 +563,370 @@ class StyleExtractor:
 
 
 # ===================================================================
+# Template Format Extractor
+# ===================================================================
+
+def extract_template_formats(temp_dir: str) -> Dict[str, Any]:
+    """Dynamically extract ALL formatting info from the template.
+
+    Returns a dict with keys like font_hint, body_style_id, body_lang,
+    heading_numPr, formula_rfonts, reference_style_id, image_style_id, etc.
+    This eliminates the need for any hardcoded format values.
+    """
+    styles_path = os.path.join(temp_dir, 'word', 'styles.xml')
+    doc_path = os.path.join(temp_dir, 'word', 'document.xml')
+
+    result: Dict[str, Any] = {}
+
+    styles_root = None
+    doc_root = None
+    if os.path.isfile(styles_path):
+        styles_root = ET.parse(styles_path).getroot()
+    if os.path.isfile(doc_path):
+        doc_root = ET.parse(doc_path).getroot()
+
+    if styles_root is None:
+        return result
+
+    # Build lookups: styleId -> element, lower(name) -> element
+    style_by_id: Dict[str, ET.Element] = {}
+    style_by_name: Dict[str, ET.Element] = {}
+    for s in styles_root.findall(f'.//{NS_W}style'):
+        sid = s.get(f'{NS_W}styleId', '')
+        if sid:
+            style_by_id[sid] = s
+        name_el = s.find(f'{NS_W}name')
+        if name_el is not None:
+            nm = name_el.get(f'{NS_W}val', '')
+            if nm:
+                style_by_name[nm.lower()] = s
+
+    # ---- font_hint from docDefaults ----
+    has_east_asian = False
+    defaults = styles_root.find(f'{NS_W}docDefaults')
+    if defaults is not None:
+        rPrDef = defaults.find(f'.//{NS_W}rPrDefault')
+        if rPrDef is not None:
+            rPr = rPrDef.find(f'{NS_W}rPr')
+            if rPr is not None:
+                rFonts_el = rPr.find(f'{NS_W}rFonts')
+                if rFonts_el is not None:
+                    hint_val = rFonts_el.get(f'{NS_W}hint')
+                    if hint_val:
+                        result['font_hint'] = hint_val
+                    if rFonts_el.get(f'{NS_W}eastAsia') or rFonts_el.get(f'{NS_W}eastAsiaTheme'):
+                        has_east_asian = True
+                lang_el = rPr.find(f'{NS_W}lang')
+                if lang_el is not None:
+                    if lang_el.get(f'{NS_W}eastAsia'):
+                        has_east_asian = True
+                    result['default_lang'] = {
+                        k.split('}')[-1]: v for k, v in lang_el.attrib.items()
+                    }
+
+    if 'font_hint' not in result and has_east_asian:
+        result['font_hint'] = 'eastAsia'
+
+    # ---- body_style_id: most-frequent paragraph style in document ----
+    heading_sids: set = set()
+    for s in styles_root.findall(f'.//{NS_W}style'):
+        name_el = s.find(f'{NS_W}name')
+        if name_el is not None:
+            nm = name_el.get(f'{NS_W}val', '').lower()
+            if 'heading' in nm or '标题' in nm:
+                heading_sids.add(s.get(f'{NS_W}styleId', ''))
+
+    if doc_root is not None:
+        body_el = doc_root.find(f'{NS_W}body')
+        if body_el is not None:
+            style_counter: Counter = Counter()
+            for p in body_el.findall(f'{NS_W}p'):
+                pPr = p.find(f'{NS_W}pPr')
+                if pPr is not None:
+                    ps = pPr.find(f'{NS_W}pStyle')
+                    if ps is not None:
+                        sid = ps.get(f'{NS_W}val', '')
+                        if sid and sid not in heading_sids:
+                            style_counter[sid] += 1
+            if style_counter:
+                result['body_style_id'] = style_counter.most_common(1)[0][0]
+
+    # ---- body_rfonts, body_lang from body style ----
+    body_sid = result.get('body_style_id', '')
+    if body_sid and body_sid in style_by_id:
+        body_s = style_by_id[body_sid]
+        rPr = body_s.find(f'{NS_W}rPr')
+        if rPr is not None:
+            rFonts_el = rPr.find(f'{NS_W}rFonts')
+            if rFonts_el is not None:
+                result['body_rfonts'] = {
+                    k.split('}')[-1]: v for k, v in rFonts_el.attrib.items()
+                    if 'Theme' not in k
+                }
+            lang_el = rPr.find(f'{NS_W}lang')
+            if lang_el is not None:
+                result['body_lang'] = {
+                    k.split('}')[-1]: v for k, v in lang_el.attrib.items()
+                }
+
+    # ---- heading_numPr: per heading level from styles.xml ----
+    heading_numpr: Dict[str, Optional[Dict[str, str]]] = {}
+    for lvl in range(1, 10):
+        candidates = [f'heading {lvl}', f'heading{lvl}', f'标题 {lvl}', f'标题{lvl}']
+        for cand in candidates:
+            if cand in style_by_name:
+                s = style_by_name[cand]
+                pPr = s.find(f'{NS_W}pPr')
+                key = f'heading{lvl}'
+                if pPr is not None:
+                    numPr = pPr.find(f'{NS_W}numPr')
+                    if numPr is not None:
+                        ilvl_el = numPr.find(f'{NS_W}ilvl')
+                        numId_el = numPr.find(f'{NS_W}numId')
+                        heading_numpr[key] = {
+                            'ilvl': ilvl_el.get(f'{NS_W}val', str(lvl - 1)) if ilvl_el is not None else str(lvl - 1),
+                            'numId': numId_el.get(f'{NS_W}val', '0') if numId_el is not None else '0',
+                        }
+                    else:
+                        heading_numpr[key] = None
+                else:
+                    heading_numpr[key] = None
+                break
+    result['heading_numPr'] = heading_numpr
+
+    # ---- formula format: follow link → basedOn chain ----
+    def _follow_chain_rpr(start_sid: str, attr_name: str, visited: Optional[set] = None) -> Dict[str, str]:
+        if visited is None:
+            visited = set()
+        if start_sid in visited or start_sid not in style_by_id:
+            return {}
+        visited.add(start_sid)
+        s = style_by_id[start_sid]
+        rPr = s.find(f'{NS_W}rPr')
+        if rPr is not None:
+            el = rPr.find(f'{NS_W}{attr_name}')
+            if el is not None and len(el.attrib) > 0:
+                return {k.split('}')[-1]: v for k, v in el.attrib.items()}
+        link = s.find(f'{NS_W}link')
+        if link is not None:
+            attrs = _follow_chain_rpr(link.get(f'{NS_W}val', ''), attr_name, visited)
+            if attrs:
+                return attrs
+        basedOn = s.find(f'{NS_W}basedOn')
+        if basedOn is not None:
+            return _follow_chain_rpr(basedOn.get(f'{NS_W}val', ''), attr_name, visited)
+        return {}
+
+    formula_sid = ''
+    for name_key in ('公式', 'formula', 'equation', 'mtdisplayequation'):
+        if name_key in style_by_name:
+            formula_sid = style_by_name[name_key].get(f'{NS_W}styleId', '')
+            break
+    if formula_sid:
+        f_rfonts = _follow_chain_rpr(formula_sid, 'rFonts')
+        if f_rfonts:
+            result['formula_rfonts'] = {k: v for k, v in f_rfonts.items() if 'Theme' not in k}
+        f_lang = _follow_chain_rpr(formula_sid, 'lang')
+        if f_lang:
+            result['formula_lang'] = f_lang
+
+    # ---- img_max_width_emu from sectPr ----
+    if doc_root is not None:
+        for sect_pr in doc_root.iter(f'{NS_W}sectPr'):
+            pgSz = sect_pr.find(f'{NS_W}pgSz')
+            pgMar = sect_pr.find(f'{NS_W}pgMar')
+            if pgSz is not None and pgMar is not None:
+                try:
+                    page_w = int(pgSz.get(f'{NS_W}w', '11906'))
+                    margin_l = int(pgMar.get(f'{NS_W}left', '1800'))
+                    margin_r = int(pgMar.get(f'{NS_W}right', '1800'))
+                    content_twips = page_w - margin_l - margin_r
+                    result['img_max_width_emu'] = int(content_twips * EMU_PER_INCH / 1440)
+                except ValueError:
+                    pass
+
+    # ---- special style IDs ----
+    for name_key in ('参考文献', 'reference', 'bibliography'):
+        if name_key in style_by_name:
+            result['reference_style_id'] = style_by_name[name_key].get(f'{NS_W}styleId', '')
+            break
+
+    for name_key in ('图片', 'image', 'figure'):
+        if name_key in style_by_name:
+            s = style_by_name[name_key]
+            if s.get(f'{NS_W}type') == 'paragraph':
+                result['image_style_id'] = s.get(f'{NS_W}styleId', '')
+                break
+
+    for name_key in ('三线表', 'table grid', 'normal table'):
+        if name_key in style_by_name:
+            s = style_by_name[name_key]
+            if s.get(f'{NS_W}type') == 'table':
+                result['table_style_id'] = s.get(f'{NS_W}styleId', '')
+                break
+
+    # ---- table format: extract from ACTUAL tables in document ----
+    def _extract_cell_borders(tc_el: ET.Element) -> Optional[Dict[str, Dict[str, str]]]:
+        tcPr = tc_el.find(f'{NS_W}tcPr')
+        if tcPr is None:
+            return None
+        borders = tcPr.find(f'{NS_W}tcBorders')
+        if borders is None:
+            return None
+        border_dict: Dict[str, Dict[str, str]] = {}
+        for b in borders:
+            bname = b.tag.split('}')[-1]
+            border_dict[bname] = {k.split('}')[-1]: v for k, v in b.attrib.items()}
+        return border_dict if border_dict else None
+
+    if doc_root is not None:
+        body_el = doc_root.find(f'{NS_W}body')
+        if body_el is not None:
+            for tbl in body_el.findall(f'{NS_W}tbl'):
+                tbl_fmt: Dict[str, Any] = {}
+                tblPr = tbl.find(f'{NS_W}tblPr')
+                if tblPr is not None:
+                    ts = tblPr.find(f'{NS_W}tblStyle')
+                    if ts is not None:
+                        tbl_fmt['style'] = ts.get(f'{NS_W}val', '')
+                    tw = tblPr.find(f'{NS_W}tblW')
+                    if tw is not None:
+                        tbl_fmt['width_w'] = tw.get(f'{NS_W}w', '5000')
+                        tbl_fmt['width_type'] = tw.get(f'{NS_W}type', 'pct')
+                    jc_el = tblPr.find(f'{NS_W}jc')
+                    if jc_el is not None:
+                        tbl_fmt['jc'] = jc_el.get(f'{NS_W}val', 'center')
+                    layout_el = tblPr.find(f'{NS_W}tblLayout')
+                    if layout_el is not None:
+                        tbl_fmt['layout'] = layout_el.get(f'{NS_W}type', 'autofit')
+                    borders_el = tblPr.find(f'{NS_W}tblBorders')
+                    if borders_el is not None:
+                        tbl_fmt['borders'] = {}
+                        for b in borders_el:
+                            bname = b.tag.split('}')[-1]
+                            tbl_fmt['borders'][bname] = {
+                                k.split('}')[-1]: v for k, v in b.attrib.items()
+                            }
+                    look_el = tblPr.find(f'{NS_W}tblLook')
+                    if look_el is not None:
+                        tbl_fmt['look'] = {
+                            k.split('}')[-1]: v for k, v in look_el.attrib.items()
+                        }
+                rows = tbl.findall(f'{NS_W}tr')
+                if rows:
+                    trPr = rows[0].find(f'{NS_W}trPr')
+                    if trPr is not None:
+                        tr_fmt: Dict[str, Dict] = {}
+                        for child in trPr:
+                            cname = child.tag.split('}')[-1]
+                            tr_fmt[cname] = {
+                                k.split('}')[-1]: v for k, v in child.attrib.items()
+                            }
+                        tbl_fmt['row_format'] = tr_fmt
+
+                    # Cell-level border patterns by row position
+                    cell_borders_map: Dict[str, Dict] = {}
+                    first_tc = rows[0].find(f'{NS_W}tc')
+                    if first_tc is not None:
+                        hdr_borders = _extract_cell_borders(first_tc)
+                        if hdr_borders:
+                            cell_borders_map['header'] = hdr_borders
+                    if len(rows) > 2:
+                        mid_idx = len(rows) // 2
+                        mid_tc = rows[mid_idx].find(f'{NS_W}tc')
+                        if mid_tc is not None:
+                            body_borders = _extract_cell_borders(mid_tc)
+                            if body_borders:
+                                cell_borders_map['body'] = body_borders
+                    if len(rows) > 1:
+                        last_tc = rows[-1].find(f'{NS_W}tc')
+                        if last_tc is not None:
+                            last_borders = _extract_cell_borders(last_tc)
+                            if last_borders:
+                                cell_borders_map['last'] = last_borders
+                    if cell_borders_map:
+                        tbl_fmt['cell_borders'] = cell_borders_map
+
+                    # Cell formatting from first header cell
+                    tcs = rows[0].findall(f'{NS_W}tc')
+                    if tcs:
+                        tc0 = tcs[0]
+                        tcPr0 = tc0.find(f'{NS_W}tcPr')
+                        if tcPr0 is not None:
+                            shd = tcPr0.find(f'{NS_W}shd')
+                            if shd is not None:
+                                tbl_fmt['cell_shd'] = {
+                                    k.split('}')[-1]: v for k, v in shd.attrib.items()
+                                    if 'Theme' not in k
+                                }
+                        p = tc0.find(f'{NS_W}p')
+                        if p is not None:
+                            pPr = p.find(f'{NS_W}pPr')
+                            if pPr is not None:
+                                ps = pPr.find(f'{NS_W}pStyle')
+                                if ps is not None:
+                                    tbl_fmt['cell_style'] = ps.get(f'{NS_W}val', '')
+                                ind_el = pPr.find(f'{NS_W}ind')
+                                if ind_el is not None:
+                                    tbl_fmt['cell_ind'] = {
+                                        k.split('}')[-1]: v for k, v in ind_el.attrib.items()
+                                    }
+                                rPr = pPr.find(f'{NS_W}rPr')
+                                if rPr is not None:
+                                    cell_rpr: Dict[str, Any] = {}
+                                    for child in rPr:
+                                        cname = child.tag.split('}')[-1]
+                                        if cname == 'rFonts':
+                                            continue
+                                        if child.attrib:
+                                            cell_rpr[cname] = {
+                                                k.split('}')[-1]: v for k, v in child.attrib.items()
+                                            }
+                                        else:
+                                            cell_rpr[cname] = True
+                                    if cell_rpr:
+                                        tbl_fmt['cell_rPr'] = cell_rpr
+                result['table_format'] = tbl_fmt
+                if 'style' in tbl_fmt:
+                    result['table_style_id'] = tbl_fmt['style']
+                break
+
+            # ---- table caption format: centered paragraph before first table ----
+            prev_p = None
+            for child in body_el:
+                if child.tag == f'{NS_W}tbl' and prev_p is not None:
+                    pPr = prev_p.find(f'{NS_W}pPr')
+                    if pPr is not None:
+                        jc_el = pPr.find(f'{NS_W}jc')
+                        if jc_el is not None and jc_el.get(f'{NS_W}val', '') == 'center':
+                            cap_fmt: Dict[str, Any] = {}
+                            ps = pPr.find(f'{NS_W}pStyle')
+                            if ps is not None:
+                                cap_fmt['style'] = ps.get(f'{NS_W}val', '')
+                            ind_el = pPr.find(f'{NS_W}ind')
+                            if ind_el is not None:
+                                cap_fmt['ind'] = {
+                                    k.split('}')[-1]: v for k, v in ind_el.attrib.items()
+                                }
+                            cap_fmt['jc'] = 'center'
+                            rPr = pPr.find(f'{NS_W}rPr')
+                            if rPr is not None:
+                                if rPr.find(f'{NS_W}b') is not None:
+                                    cap_fmt['bold'] = True
+                                sz_el = rPr.find(f'{NS_W}sz')
+                                if sz_el is not None:
+                                    cap_fmt['sz'] = sz_el.get(f'{NS_W}val', '')
+                                szCs_el = rPr.find(f'{NS_W}szCs')
+                                if szCs_el is not None:
+                                    cap_fmt['szCs'] = szCs_el.get(f'{NS_W}val', '')
+                            result['table_caption_format'] = cap_fmt
+                            break
+                prev_p = child if child.tag == f'{NS_W}p' else None
+
+    return result
+
+
+# ===================================================================
 # Image helper
 # ===================================================================
 
@@ -504,44 +977,6 @@ class MarkdownToDocxConverter:
         return f'rId{self._rel_id_counter}'
 
     # ------------------------------------------------------------------
-    # Main entry point
-    # ------------------------------------------------------------------
-
-    def convert(self, markdown_content: str, output_path: str):
-        temp_dir = '/tmp/docx_ew_' + hashlib.md5(output_path.encode()).hexdigest()[:8]
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-
-        with zipfile.ZipFile(self.template_path, 'r') as z:
-            z.extractall(temp_dir)
-
-        sx = StyleExtractor(temp_dir)
-        self._heading_ids = sx.heading_ids()
-        self._body_id = sx.body_style_id()
-        self._formula_id = sx.find_style_id('formula', '公式', 'Equation')
-        self._table_style = sx.find_style_id('Normal Table', '普通表格',
-                                              'Table Grid', '网格型')
-        self._sect_pr_xml = sx.extract_sect_pr_xml()
-
-        doc_xml = self._generate_document_xml(markdown_content)
-        doc_path = os.path.join(temp_dir, 'word', 'document.xml')
-        with open(doc_path, 'w', encoding='utf-8') as f:
-            f.write(doc_xml)
-
-        if self._image_rels:
-            self._update_rels(temp_dir)
-
-        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for root, _dirs, files in os.walk(temp_dir):
-                for fn in files:
-                    fp = os.path.join(root, fn)
-                    arcname = os.path.relpath(fp, temp_dir)
-                    zf.write(fp, arcname)
-
-        shutil.rmtree(temp_dir)
-        print(f"Converted to: {output_path}")
-
-    # ------------------------------------------------------------------
     # Rels update for images
     # ------------------------------------------------------------------
 
@@ -580,6 +1015,7 @@ class MarkdownToDocxConverter:
         root.set('xmlns:wne', 'http://schemas.microsoft.com/office/word/2006/wordml')
         root.set('xmlns:wps', 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape')
         root.set('xmlns:wpsCustomData', 'http://www.wps.cn/officeDocument/2013/wpsCustomData')
+        root.set('xmlns:r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships')
         root.set('xmlns:a', 'http://schemas.openxmlformats.org/drawingml/2006/main')
         root.set('xmlns:pic', 'http://schemas.openxmlformats.org/drawingml/2006/picture')
         root.set('mc:Ignorable', 'w14 w15 wp14')
@@ -659,6 +1095,17 @@ class MarkdownToDocxConverter:
                 body.append(self._list_para(text, ordered=True))
                 i += 1
 
+            # Reference paragraph [N] Author...
+            elif re.match(r'^\[\d+\]\s', stripped):
+                body.append(self._reference_para(stripped))
+                i += 1
+
+            # Table / figure caption: 表X-Y ... or 图X-Y ...
+            elif re.match(r'^(\*\*)?[表图]\d+-\d+', stripped):
+                cap_text = stripped.strip('*').strip()
+                body.append(self._table_caption_para(cap_text))
+                i += 1
+
             # Normal body paragraph (may span multiple lines)
             else:
                 para_parts = [line]
@@ -670,6 +1117,10 @@ class MarkdownToDocxConverter:
                     if nxt.strip().startswith(('#', '|', '$$', '```', '![', '- ')):
                         break
                     if re.match(r'^\d+\.\s', nxt.strip()):
+                        break
+                    if re.match(r'^\[\d+\]\s', nxt.strip()):
+                        break
+                    if re.match(r'^(\*\*)?[表图]\d+-\d+', nxt.strip()):
                         break
                     para_parts.append(nxt)
                     i += 1
@@ -713,9 +1164,11 @@ class MarkdownToDocxConverter:
         p = ET.Element(f'{NS_W}p')
         p.set(f'{NS_W14}paraId', self._next_para_id())
         pPr = ET.SubElement(p, f'{NS_W}pPr')
-        rPr = ET.SubElement(pPr, f'{NS_W}rPr')
-        rFonts = ET.SubElement(rPr, f'{NS_W}rFonts')
-        rFonts.set(f'{NS_W}hint', 'eastAsia')
+        hint = self.tmpl_fmt.get('font_hint', '')
+        if hint:
+            rPr = ET.SubElement(pPr, f'{NS_W}rPr')
+            rFonts = ET.SubElement(rPr, f'{NS_W}rFonts')
+            rFonts.set(f'{NS_W}hint', hint)
         return p
 
     def _heading_para(self, level: int, text: str) -> ET.Element:
@@ -726,19 +1179,23 @@ class MarkdownToDocxConverter:
         if sid:
             pStyle = ET.SubElement(pPr, f'{NS_W}pStyle')
             pStyle.set(f'{NS_W}val', sid)
-        if level >= 2:
+        numpr_info = self.tmpl_fmt.get('heading_numPr', {}).get(f'heading{level}')
+        if numpr_info is not None:
             numPr = ET.SubElement(pPr, f'{NS_W}numPr')
-            ilvl = ET.SubElement(numPr, f'{NS_W}ilvl')
-            ilvl.set(f'{NS_W}val', '1')
-            numId = ET.SubElement(numPr, f'{NS_W}numId')
-            numId.set(f'{NS_W}val', '0')
-        rPr = ET.SubElement(pPr, f'{NS_W}rPr')
-        rFonts = ET.SubElement(rPr, f'{NS_W}rFonts')
-        rFonts.set(f'{NS_W}hint', 'eastAsia')
+            ilvl_el = ET.SubElement(numPr, f'{NS_W}ilvl')
+            ilvl_el.set(f'{NS_W}val', numpr_info['ilvl'])
+            numId_el = ET.SubElement(numPr, f'{NS_W}numId')
+            numId_el.set(f'{NS_W}val', '0')
+        hint = self.tmpl_fmt.get('font_hint', '')
+        if hint:
+            rPr = ET.SubElement(pPr, f'{NS_W}rPr')
+            rFonts = ET.SubElement(rPr, f'{NS_W}rFonts')
+            rFonts.set(f'{NS_W}hint', hint)
         r = ET.SubElement(p, f'{NS_W}r')
-        rPr2 = ET.SubElement(r, f'{NS_W}rPr')
-        rFonts2 = ET.SubElement(rPr2, f'{NS_W}rFonts')
-        rFonts2.set(f'{NS_W}hint', 'eastAsia')
+        if hint:
+            rPr2 = ET.SubElement(r, f'{NS_W}rPr')
+            rFonts2 = ET.SubElement(rPr2, f'{NS_W}rFonts')
+            rFonts2.set(f'{NS_W}hint', hint)
         t = ET.SubElement(r, f'{NS_W}t')
         t.text = text
         return p
@@ -750,11 +1207,17 @@ class MarkdownToDocxConverter:
         if self._body_id:
             pStyle = ET.SubElement(pPr, f'{NS_W}pStyle')
             pStyle.set(f'{NS_W}val', self._body_id)
-        rPr = ET.SubElement(pPr, f'{NS_W}rPr')
-        rFonts = ET.SubElement(rPr, f'{NS_W}rFonts')
-        rFonts.set(f'{NS_W}hint', 'eastAsia')
-        lang = ET.SubElement(rPr, f'{NS_W}lang')
-        lang.set(f'{NS_W}eastAsia', 'zh-CN')
+        hint = self.tmpl_fmt.get('font_hint', '')
+        body_lang = self.tmpl_fmt.get('body_lang') or self.tmpl_fmt.get('default_lang', {})
+        if hint or body_lang:
+            rPr = ET.SubElement(pPr, f'{NS_W}rPr')
+            if hint:
+                rFonts = ET.SubElement(rPr, f'{NS_W}rFonts')
+                rFonts.set(f'{NS_W}hint', hint)
+            if body_lang:
+                lang_el = ET.SubElement(rPr, f'{NS_W}lang')
+                for attr, val in body_lang.items():
+                    lang_el.set(f'{NS_W}{attr}', val)
 
         parts = re.split(r'(\$[^$]+\$)', text)
         for part in parts:
@@ -768,22 +1231,25 @@ class MarkdownToDocxConverter:
 
     def _add_rich_runs(self, p: ET.Element, text: str):
         """Handle **bold** and *italic* in text, add w:r elements to p."""
+        hint = self.tmpl_fmt.get('font_hint', '')
         segments = re.split(r'(\*\*[^*]+\*\*|\*[^*]+\*)', text)
         for seg in segments:
             if not seg or not seg.strip():
                 if seg and (' ' in seg or '\t' in seg):
                     r = ET.SubElement(p, f'{NS_W}r')
-                    rPr = ET.SubElement(r, f'{NS_W}rPr')
-                    rF = ET.SubElement(rPr, f'{NS_W}rFonts')
-                    rF.set(f'{NS_W}hint', 'eastAsia')
+                    if hint:
+                        rPr = ET.SubElement(r, f'{NS_W}rPr')
+                        rF = ET.SubElement(rPr, f'{NS_W}rFonts')
+                        rF.set(f'{NS_W}hint', hint)
                     t = ET.SubElement(r, f'{NS_W}t')
                     t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
                     t.text = seg
                 continue
             r = ET.SubElement(p, f'{NS_W}r')
             rPr = ET.SubElement(r, f'{NS_W}rPr')
-            rF = ET.SubElement(rPr, f'{NS_W}rFonts')
-            rF.set(f'{NS_W}hint', 'eastAsia')
+            if hint:
+                rF = ET.SubElement(rPr, f'{NS_W}rFonts')
+                rF.set(f'{NS_W}hint', hint)
             if seg.startswith('**') and seg.endswith('**'):
                 ET.SubElement(rPr, f'{NS_W}b')
                 seg = seg[2:-2]
@@ -804,26 +1270,39 @@ class MarkdownToDocxConverter:
             pStyle.set(f'{NS_W}val', self._formula_id)
         bidi = ET.SubElement(pPr, f'{NS_W}bidi')
         bidi.set(f'{NS_W}val', '0')
-        rPr = ET.SubElement(pPr, f'{NS_W}rPr')
-        rFonts = ET.SubElement(rPr, f'{NS_W}rFonts')
-        rFonts.set(f'{NS_W}hint', 'default')
-        lang = ET.SubElement(rPr, f'{NS_W}lang')
-        lang.set(f'{NS_W}val', 'en-US')
-        lang.set(f'{NS_W}eastAsia', 'zh-CN')
+
+        f_rfonts = self.tmpl_fmt.get('formula_rfonts', {})
+        f_lang = self.tmpl_fmt.get('formula_lang') or self.tmpl_fmt.get('default_lang', {})
+        hint = self.tmpl_fmt.get('font_hint', '')
+
+        if f_rfonts or f_lang:
+            rPr = ET.SubElement(pPr, f'{NS_W}rPr')
+            if f_rfonts:
+                rFonts = ET.SubElement(rPr, f'{NS_W}rFonts')
+                rFonts.set(f'{NS_W}hint', f_rfonts.get('hint', 'default'))
+                for attr in ('eastAsia', 'ascii', 'hAnsi'):
+                    if attr in f_rfonts:
+                        rFonts.set(f'{NS_W}{attr}', f_rfonts[attr])
+            if f_lang:
+                lang_el = ET.SubElement(rPr, f'{NS_W}lang')
+                for attr, val in f_lang.items():
+                    lang_el.set(f'{NS_W}{attr}', val)
 
         # Tab before formula
         r_tab = ET.SubElement(p, f'{NS_W}r')
         rPr_tab = ET.SubElement(r_tab, f'{NS_W}rPr')
         rF_tab = ET.SubElement(rPr_tab, f'{NS_W}rFonts')
-        rF_tab.set(f'{NS_W}hint', 'eastAsia')
+        if hint:
+            rF_tab.set(f'{NS_W}hint', hint)
         rF_tab.set(f'{NS_W}hAnsi', 'Cambria Math')
         b_el = ET.SubElement(rPr_tab, f'{NS_W}b')
         b_el.set(f'{NS_W}val', '0')
         i_el = ET.SubElement(rPr_tab, f'{NS_W}i')
         i_el.set(f'{NS_W}val', '0')
-        lang_t = ET.SubElement(rPr_tab, f'{NS_W}lang')
-        lang_t.set(f'{NS_W}val', 'en-US')
-        lang_t.set(f'{NS_W}eastAsia', 'zh-CN')
+        if f_lang:
+            lang_t = ET.SubElement(rPr_tab, f'{NS_W}lang')
+            for attr, val in f_lang.items():
+                lang_t.set(f'{NS_W}{attr}', val)
         ET.SubElement(r_tab, f'{NS_W}tab')
 
         omml = self.latex_converter.convert(formula)
@@ -834,13 +1313,15 @@ class MarkdownToDocxConverter:
         r_tab2 = ET.SubElement(p, f'{NS_W}r')
         rPr_tab2 = ET.SubElement(r_tab2, f'{NS_W}rPr')
         rF_tab2 = ET.SubElement(rPr_tab2, f'{NS_W}rFonts')
-        rF_tab2.set(f'{NS_W}hint', 'eastAsia')
+        if hint:
+            rF_tab2.set(f'{NS_W}hint', hint)
         rF_tab2.set(f'{NS_W}hAnsi', 'Cambria Math')
         i_el2 = ET.SubElement(rPr_tab2, f'{NS_W}i')
         i_el2.set(f'{NS_W}val', '0')
-        lang_t2 = ET.SubElement(rPr_tab2, f'{NS_W}lang')
-        lang_t2.set(f'{NS_W}val', 'en-US')
-        lang_t2.set(f'{NS_W}eastAsia', 'zh-CN')
+        if f_lang:
+            lang_t2 = ET.SubElement(rPr_tab2, f'{NS_W}lang')
+            for attr, val in f_lang.items():
+                lang_t2.set(f'{NS_W}{attr}', val)
         ET.SubElement(r_tab2, f'{NS_W}tab')
         return p
 
@@ -851,9 +1332,11 @@ class MarkdownToDocxConverter:
         if self._body_id:
             pStyle = ET.SubElement(pPr, f'{NS_W}pStyle')
             pStyle.set(f'{NS_W}val', self._body_id)
-        rPr = ET.SubElement(pPr, f'{NS_W}rPr')
-        rFonts = ET.SubElement(rPr, f'{NS_W}rFonts')
-        rFonts.set(f'{NS_W}hint', 'eastAsia')
+        hint = self.tmpl_fmt.get('font_hint', '')
+        if hint:
+            rPr = ET.SubElement(pPr, f'{NS_W}rPr')
+            rFonts = ET.SubElement(rPr, f'{NS_W}rFonts')
+            rFonts.set(f'{NS_W}hint', hint)
 
         prefix = '• ' if not ordered else ''
         parts = re.split(r'(\$[^$]+\$)', text)
@@ -893,6 +1376,84 @@ class MarkdownToDocxConverter:
         return p
 
     # ------------------------------------------------------------------
+    # Table / figure caption paragraph
+    # ------------------------------------------------------------------
+
+    def _table_caption_para(self, text: str) -> ET.Element:
+        """Create a centered caption paragraph using the template's caption format."""
+        p = ET.Element(f'{NS_W}p')
+        p.set(f'{NS_W14}paraId', self._next_para_id())
+        pPr = ET.SubElement(p, f'{NS_W}pPr')
+
+        cap_fmt = self.tmpl_fmt.get('table_caption_format', {})
+        style = cap_fmt.get('style', self._body_id)
+        if style:
+            pStyle = ET.SubElement(pPr, f'{NS_W}pStyle')
+            pStyle.set(f'{NS_W}val', style)
+
+        ind = cap_fmt.get('ind')
+        if ind:
+            ind_el = ET.SubElement(pPr, f'{NS_W}ind')
+            for attr, val in ind.items():
+                ind_el.set(f'{NS_W}{attr}', val)
+
+        jc = ET.SubElement(pPr, f'{NS_W}jc')
+        jc.set(f'{NS_W}val', cap_fmt.get('jc', 'center'))
+
+        hint = self.tmpl_fmt.get('font_hint', '')
+        rPr_pPr = ET.SubElement(pPr, f'{NS_W}rPr')
+        if hint:
+            rF = ET.SubElement(rPr_pPr, f'{NS_W}rFonts')
+            rF.set(f'{NS_W}hint', hint)
+        if cap_fmt.get('bold'):
+            ET.SubElement(rPr_pPr, f'{NS_W}b')
+            ET.SubElement(rPr_pPr, f'{NS_W}bCs')
+        sz = cap_fmt.get('sz')
+        if sz:
+            ET.SubElement(rPr_pPr, f'{NS_W}sz').set(f'{NS_W}val', sz)
+        szCs = cap_fmt.get('szCs')
+        if szCs:
+            ET.SubElement(rPr_pPr, f'{NS_W}szCs').set(f'{NS_W}val', szCs)
+
+        r = ET.SubElement(p, f'{NS_W}r')
+        rPr = ET.SubElement(r, f'{NS_W}rPr')
+        if hint:
+            rF2 = ET.SubElement(rPr, f'{NS_W}rFonts')
+            rF2.set(f'{NS_W}hint', hint)
+        if cap_fmt.get('bold'):
+            ET.SubElement(rPr, f'{NS_W}b')
+            ET.SubElement(rPr, f'{NS_W}bCs')
+        if sz:
+            ET.SubElement(rPr, f'{NS_W}sz').set(f'{NS_W}val', sz)
+        if szCs:
+            ET.SubElement(rPr, f'{NS_W}szCs').set(f'{NS_W}val', szCs)
+
+        t = ET.SubElement(r, f'{NS_W}t')
+        t.text = text
+        return p
+
+    # ------------------------------------------------------------------
+    # Reference paragraph
+    # ------------------------------------------------------------------
+
+    def _reference_para(self, text: str) -> ET.Element:
+        """Create a reference paragraph using template's reference style if available."""
+        p = ET.Element(f'{NS_W}p')
+        p.set(f'{NS_W14}paraId', self._next_para_id())
+        pPr = ET.SubElement(p, f'{NS_W}pPr')
+        style_id = self._ref_style_id or self._body_id
+        if style_id:
+            pStyle = ET.SubElement(pPr, f'{NS_W}pStyle')
+            pStyle.set(f'{NS_W}val', style_id)
+        hint = self.tmpl_fmt.get('font_hint', '')
+        if hint:
+            rPr = ET.SubElement(pPr, f'{NS_W}rPr')
+            rFonts = ET.SubElement(rPr, f'{NS_W}rFonts')
+            rFonts.set(f'{NS_W}hint', hint)
+        self._add_rich_runs(p, text)
+        return p
+
+    # ------------------------------------------------------------------
     # Table
     # ------------------------------------------------------------------
 
@@ -902,7 +1463,7 @@ class MarkdownToDocxConverter:
         headers = [h.strip() for h in table_lines[0].split('|')[1:-1]]
         if not headers:
             return None
-        data_lines = table_lines[2:]  # skip separator
+        data_lines = table_lines[2:]
         rows: List[List[str]] = []
         for ln in data_lines:
             if ln.strip():
@@ -910,62 +1471,144 @@ class MarkdownToDocxConverter:
                 if cells:
                     rows.append(cells)
 
-        n_cols = len(headers)
-        col_w = str(int(9000 / n_cols))
+        tbl_fmt = self.tmpl_fmt.get('table_format', {})
 
         tbl = ET.Element(f'{NS_W}tbl')
         tblPr = ET.SubElement(tbl, f'{NS_W}tblPr')
-        if self._table_style:
-            ts = ET.SubElement(tblPr, f'{NS_W}tblStyle')
-            ts.set(f'{NS_W}val', self._table_style)
-        tW = ET.SubElement(tblPr, f'{NS_W}tblW')
-        tW.set(f'{NS_W}w', '5000')
-        tW.set(f'{NS_W}type', 'pct')
-        jc = ET.SubElement(tblPr, f'{NS_W}jc')
-        jc.set(f'{NS_W}val', 'center')
-        layout = ET.SubElement(tblPr, f'{NS_W}tblLayout')
-        layout.set(f'{NS_W}type', 'fixed')
 
-        # Add table borders
-        tblBorders = ET.SubElement(tblPr, f'{NS_W}tblBorders')
-        for pos in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
-            b = ET.SubElement(tblBorders, f'{NS_W}{pos}')
-            b.set(f'{NS_W}val', 'single')
-            b.set(f'{NS_W}sz', '4')
-            b.set(f'{NS_W}space', '0')
-            b.set(f'{NS_W}color', 'auto')
+        style = tbl_fmt.get('style', self._table_style)
+        if style:
+            ts = ET.SubElement(tblPr, f'{NS_W}tblStyle')
+            ts.set(f'{NS_W}val', style)
+
+        tW = ET.SubElement(tblPr, f'{NS_W}tblW')
+        tW.set(f'{NS_W}w', tbl_fmt.get('width_w', '5000'))
+        tW.set(f'{NS_W}type', tbl_fmt.get('width_type', 'pct'))
+
+        jc = ET.SubElement(tblPr, f'{NS_W}jc')
+        jc.set(f'{NS_W}val', tbl_fmt.get('jc', 'center'))
+
+        layout = ET.SubElement(tblPr, f'{NS_W}tblLayout')
+        layout.set(f'{NS_W}type', tbl_fmt.get('layout', 'autofit'))
+
+        borders = tbl_fmt.get('borders')
+        if borders:
+            tblBorders = ET.SubElement(tblPr, f'{NS_W}tblBorders')
+            for pos, attrs in borders.items():
+                b = ET.SubElement(tblBorders, f'{NS_W}{pos}')
+                for attr, val in attrs.items():
+                    b.set(f'{NS_W}{attr}', val)
+        else:
+            tblBorders = ET.SubElement(tblPr, f'{NS_W}tblBorders')
+            for pos in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+                b = ET.SubElement(tblBorders, f'{NS_W}{pos}')
+                b.set(f'{NS_W}val', 'single')
+                b.set(f'{NS_W}sz', '4')
+                b.set(f'{NS_W}space', '0')
+                b.set(f'{NS_W}color', 'auto')
+
+        look = tbl_fmt.get('look')
+        if look:
+            tblLook = ET.SubElement(tblPr, f'{NS_W}tblLook')
+            for attr, val in look.items():
+                tblLook.set(f'{NS_W}{attr}', val)
 
         grid = ET.SubElement(tbl, f'{NS_W}tblGrid')
         for _ in headers:
             gc = ET.SubElement(grid, f'{NS_W}gridCol')
-            gc.set(f'{NS_W}w', col_w)
+            gc.set(f'{NS_W}w', '0')
 
-        # Header row
-        self._add_table_row(tbl, headers, col_w, bold=True)
-        # Data rows
-        for row in rows:
-            self._add_table_row(tbl, row, col_w, bold=False)
+        cell_style = tbl_fmt.get('cell_style', self._body_id)
+        row_fmt = tbl_fmt.get('row_format')
+        self._add_table_row(tbl, headers, bold=True, cell_style=cell_style,
+                            row_fmt=row_fmt, row_position='header')
+        for ri, row in enumerate(rows):
+            pos = 'last' if ri == len(rows) - 1 else 'body'
+            self._add_table_row(tbl, row, bold=False, cell_style=cell_style,
+                                row_fmt=row_fmt, row_position=pos)
         return tbl
 
-    def _add_table_row(self, tbl, cells, col_w, bold=False):
+    def _add_table_row(self, tbl, cells, bold=False, cell_style='',
+                       row_fmt=None, row_position='body'):
+        hint = self.tmpl_fmt.get('font_hint', '')
+        tbl_fmt = self.tmpl_fmt.get('table_format', {})
+        cell_borders_map = tbl_fmt.get('cell_borders', {})
+        cell_borders = cell_borders_map.get(row_position, cell_borders_map.get('body'))
+        cell_shd = tbl_fmt.get('cell_shd')
+        cell_ind = tbl_fmt.get('cell_ind')
+        cell_rPr_tmpl = tbl_fmt.get('cell_rPr', {})
+
         tr = ET.SubElement(tbl, f'{NS_W}tr')
+        if row_fmt:
+            trPr = ET.SubElement(tr, f'{NS_W}trPr')
+            for rname, rattrs in row_fmt.items():
+                el = ET.SubElement(trPr, f'{NS_W}{rname}')
+                for attr, val in rattrs.items():
+                    el.set(f'{NS_W}{attr}', val)
         for cell_text in cells:
             tc = ET.SubElement(tr, f'{NS_W}tc')
             tcPr = ET.SubElement(tc, f'{NS_W}tcPr')
             tcW = ET.SubElement(tcPr, f'{NS_W}tcW')
-            tcW.set(f'{NS_W}w', col_w)
-            tcW.set(f'{NS_W}type', 'dxa')
+            tcW.set(f'{NS_W}w', '0')
+            tcW.set(f'{NS_W}type', 'auto')
+
+            if cell_borders:
+                tcBorders = ET.SubElement(tcPr, f'{NS_W}tcBorders')
+                for pos, attrs in cell_borders.items():
+                    b = ET.SubElement(tcBorders, f'{NS_W}{pos}')
+                    for attr, val in attrs.items():
+                        b.set(f'{NS_W}{attr}', val)
+
+            if cell_shd:
+                shd = ET.SubElement(tcPr, f'{NS_W}shd')
+                for attr, val in cell_shd.items():
+                    shd.set(f'{NS_W}{attr}', val)
+
             p = ET.SubElement(tc, f'{NS_W}p')
             p.set(f'{NS_W14}paraId', self._next_para_id())
             pPr = ET.SubElement(p, f'{NS_W}pPr')
+            if cell_style:
+                pStyle = ET.SubElement(pPr, f'{NS_W}pStyle')
+                pStyle.set(f'{NS_W}val', cell_style)
+            if cell_ind:
+                ind_el = ET.SubElement(pPr, f'{NS_W}ind')
+                for attr, val in cell_ind.items():
+                    ind_el.set(f'{NS_W}{attr}', val)
             jc_el = ET.SubElement(pPr, f'{NS_W}jc')
             jc_el.set(f'{NS_W}val', 'center')
+
+            if cell_rPr_tmpl:
+                pPr_rPr = ET.SubElement(pPr, f'{NS_W}rPr')
+                if hint:
+                    rF_p = ET.SubElement(pPr_rPr, f'{NS_W}rFonts')
+                    rF_p.set(f'{NS_W}hint', hint)
+                for rpr_name in ('b', 'color', 'sz', 'szCs', 'vertAlign'):
+                    rpr_info = cell_rPr_tmpl.get(rpr_name)
+                    if rpr_info is not None:
+                        el = ET.SubElement(pPr_rPr, f'{NS_W}{rpr_name}')
+                        if isinstance(rpr_info, dict):
+                            for attr, val in rpr_info.items():
+                                el.set(f'{NS_W}{attr}', val)
+
             r = ET.SubElement(p, f'{NS_W}r')
             rPr = ET.SubElement(r, f'{NS_W}rPr')
-            rF = ET.SubElement(rPr, f'{NS_W}rFonts')
-            rF.set(f'{NS_W}hint', 'eastAsia')
-            if bold:
+            if hint:
+                rF = ET.SubElement(rPr, f'{NS_W}rFonts')
+                rF.set(f'{NS_W}hint', hint)
+            if cell_rPr_tmpl.get('b') is not None:
+                b_info = cell_rPr_tmpl['b']
+                b_el = ET.SubElement(rPr, f'{NS_W}b')
+                if isinstance(b_info, dict) and 'val' in b_info:
+                    b_el.set(f'{NS_W}val', b_info['val'])
+            elif bold:
                 ET.SubElement(rPr, f'{NS_W}b')
+            for rpr_name in ('color', 'sz', 'szCs', 'vertAlign'):
+                rpr_info = cell_rPr_tmpl.get(rpr_name)
+                if rpr_info and isinstance(rpr_info, dict):
+                    el = ET.SubElement(rPr, f'{NS_W}{rpr_name}')
+                    for attr, val in rpr_info.items():
+                        el.set(f'{NS_W}{attr}', val)
+
             t = ET.SubElement(r, f'{NS_W}t')
             t.text = cell_text
 
@@ -981,6 +1624,9 @@ class MarkdownToDocxConverter:
         p = ET.Element(f'{NS_W}p')
         p.set(f'{NS_W14}paraId', self._next_para_id())
         pPr = ET.SubElement(p, f'{NS_W}pPr')
+        if self._image_style_id:
+            pStyle = ET.SubElement(pPr, f'{NS_W}pStyle')
+            pStyle.set(f'{NS_W}val', self._image_style_id)
         jc = ET.SubElement(pPr, f'{NS_W}jc')
         jc.set(f'{NS_W}val', 'center')
 
@@ -990,7 +1636,8 @@ class MarkdownToDocxConverter:
             t.text = f'[Image not found: {img_path}]'
             return p
 
-        w_emu, h_emu = _image_size_emu(img_path)
+        max_w = self.tmpl_fmt.get('img_max_width_emu', 5400000)
+        w_emu, h_emu = _image_size_emu(img_path, max_width_emu=max_w)
         rid = self._next_rel_id()
 
         ext = os.path.splitext(img_path)[1].lower()
@@ -1047,7 +1694,6 @@ class MarkdownToDocxConverter:
 
         return p
 
-    # Override convert to also copy images
     def convert(self, markdown_content: str, output_path: str):
         temp_dir = '/tmp/docx_ew_' + hashlib.md5(output_path.encode()).hexdigest()[:8]
         if os.path.exists(temp_dir):
@@ -1056,14 +1702,22 @@ class MarkdownToDocxConverter:
         with zipfile.ZipFile(self.template_path, 'r') as z:
             z.extractall(temp_dir)
 
+        # Dynamic format extraction — no hardcoded values
+        self.tmpl_fmt = extract_template_formats(temp_dir)
+
         sx = StyleExtractor(temp_dir)
         self._heading_ids = sx.heading_ids()
-        self._body_id = sx.body_style_id()
+        self._body_id = self.tmpl_fmt.get('body_style_id', '') or sx.body_style_id()
         self._formula_id = sx.find_style_id('formula', '公式', 'Equation')
-        self._table_style = sx.find_style_id('Normal Table', '普通表格',
-                                              'Table Grid', '网格型')
+        self._ref_style_id = self.tmpl_fmt.get('reference_style_id', '')
+        self._image_style_id = self.tmpl_fmt.get('image_style_id', '')
+        self._table_style = self.tmpl_fmt.get('table_style_id', '') or sx.find_style_id(
+            'Normal Table', '普通表格', 'Table Grid', '网格型')
         self._sect_pr_xml = sx.extract_sect_pr_xml()
         self._image_rels = []
+
+        font_hint = self.tmpl_fmt.get('font_hint', '')
+        self.latex_converter = LatexToOmmlConverter(font_hint=font_hint)
 
         doc_xml = self._generate_document_xml(markdown_content)
         doc_path = os.path.join(temp_dir, 'word', 'document.xml')

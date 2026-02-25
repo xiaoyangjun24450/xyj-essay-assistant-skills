@@ -163,7 +163,7 @@ Checks: page margins, page size, headers/footers, styles, spacing.
 | `*italic*` | Italic formatting |
 | `$...$` | Inline OMML formula |
 | `$$...$$` | Display OMML formula paragraph |
-| `\| table \|` | Table with borders |
+| `\| table \|` | Table (border style from template, e.g. three-line) |
 | `![cap](path)` | Embedded image |
 | `- item` | Bullet list item |
 | `1. item` | Numbered list item |
