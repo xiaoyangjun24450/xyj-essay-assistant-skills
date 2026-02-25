@@ -57,3 +57,30 @@
 - 确保模板路径正确且文件存在
 - 新标题会自动替换模板中的原有标题
 - 所有格式（字体、行距、缩进、页眉页脚等）都会保持不变
+
+---
+
+## Skills
+
+### docx-template-replacer
+模板文本替换工具，通过直接替换 DOCX XML 中的文本来保持格式完全一致。
+
+### docx-essay-writer
+全功能论文写作工具，支持从 DOCX 模板出发，分析行文脉络后生成 Markdown 内容（含公式/表格/图片/参考文献），用户确认后转回格式完全一致的 DOCX 文档。
+
+**完整工作流**：模板分析 → Markdown 生成 → 用户审阅 → DOCX 转换 → 格式验证
+
+**内置工具**：
+- `analyze_template.py` — 解析 docx 模板的标题层级、样式映射、页面布局、特殊元素
+- `search_references.py` — 基于 OpenAlex 的学术文献检索（GB/T 7714-2015 格式）
+- `md_to_docx.py` — Markdown → DOCX 转换，动态提取模板样式，支持公式/图片/表格/列表
+- `verify_format.py` — 对比输出 docx 与模板的格式一致性
+
+**使用示例**：
+```
+参考 test_cases/Southwest Jiaotong University Thesis Template/正文.docx 的格式，
+编写一篇关于"基于ESP32的无感FOC驱动设计"的绪论，要求有参考文献、公式、表格。
+```
+
+### pyalex-researcher
+学术文献检索工具，使用 OpenAlex API 搜索论文并格式化为 GB/T 7714-2015 引用格式。
