@@ -25,8 +25,8 @@ def _extract_formatting(doc_xml: str) -> Dict[str, Any]:
     return {
         'pgMar': _first_match(r'<w:pgMar[^>]*>', doc_xml),
         'pgSz': _first_match(r'<w:pgSz[^>]*>', doc_xml),
-        'headers': re.findall(r'<w:headerReference[^>]*/>', doc_xml),
-        'footers': re.findall(r'<w:footerReference[^>]*/>', doc_xml),
+        'headers': [_normalise_xml_ws(h) for h in re.findall(r'<w:headerReference[^>]*/>', doc_xml)],
+        'footers': [_normalise_xml_ws(f) for f in re.findall(r'<w:footerReference[^>]*/>', doc_xml)],
         'spacing_520': len(re.findall(r'w:line="520"', doc_xml)),
         'spacing_500': len(re.findall(r'w:line="500"', doc_xml)),
         'spacing_400': len(re.findall(r'w:line="400"', doc_xml)),
@@ -35,7 +35,12 @@ def _extract_formatting(doc_xml: str) -> Dict[str, Any]:
 
 def _first_match(pattern: str, text: str) -> str:
     m = re.search(pattern, text)
-    return m.group(0) if m else ''
+    return _normalise_xml_ws(m.group(0)) if m else ''
+
+
+def _normalise_xml_ws(tag: str) -> str:
+    """Normalise whitespace in self-closing XML tags for reliable comparison."""
+    return re.sub(r'\s+/>', '/>', tag)
 
 
 def verify_docx(template_path: str, output_path: str) -> Tuple[bool, List[str]]:

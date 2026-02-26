@@ -1694,6 +1694,436 @@ class MarkdownToDocxConverter:
 
         return p
 
+    # ------------------------------------------------------------------
+    # Document type detection
+    # ------------------------------------------------------------------
+
+    def _is_form_template(self, temp_dir: str) -> bool:
+        """Check if template is form-type (no heading-style paragraphs in body)."""
+        sx = StyleExtractor(temp_dir)
+        heading_sids = set(sx.heading_ids().values())
+        if not heading_sids:
+            return True
+        doc_root = sx.doc_root
+        if doc_root is None:
+            return True
+        body = doc_root.find(f'{NS_W}body')
+        if body is None:
+            return True
+        for p in body.findall(f'{NS_W}p'):
+            pPr = p.find(f'{NS_W}pPr')
+            if pPr is not None:
+                ps = pPr.find(f'{NS_W}pStyle')
+                if ps is not None and ps.get(f'{NS_W}val', '') in heading_sids:
+                    return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Form-mode: template fill
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_md_sections(markdown: str) -> Dict[str, List[str]]:
+        """Parse Markdown into sections keyed by their header label.
+
+        Handles both ``## N、label`` and ``N、label`` as section delimiters.
+        Returns {normalised_label: [content_lines]}.
+        """
+        section_re = re.compile(r'^#{1,3}\s+(.+)')
+        numbered_re = re.compile(r'^(\d+)\s*[、.．]')
+
+        sections: Dict[str, List[str]] = {}
+        current_label: Optional[str] = None
+        current_lines: List[str] = []
+
+        for line in markdown.split('\n'):
+            stripped = line.strip()
+
+            # Check for Markdown heading that looks like a section label
+            hm = section_re.match(stripped)
+            if hm:
+                inner = hm.group(1).strip()
+                if numbered_re.match(inner):
+                    if current_label is not None:
+                        sections[current_label] = current_lines
+                    current_label = inner
+                    current_lines = []
+                    continue
+
+            # Check for bare numbered section header (no # prefix)
+            if numbered_re.match(stripped) and len(stripped) > 5:
+                if current_label is not None:
+                    sections[current_label] = current_lines
+                current_label = stripped
+                current_lines = []
+                continue
+
+            if current_label is not None:
+                current_lines.append(line.rstrip())
+
+        if current_label is not None:
+            sections[current_label] = current_lines
+
+        return sections
+
+    @staticmethod
+    def _clean_form_content(lines: List[str]) -> List[str]:
+        """Clean Markdown-specific syntax from content lines for form filling.
+
+        Removes: horizontal rules, table separators/headers, bold markers, heading markers.
+        Converts Markdown table data rows to plain text.
+        """
+        separator_re = re.compile(r'^-{3,}\s*$')
+        table_sep_re = re.compile(r'^\|[\s\-:|]+\|$')
+        table_row_re = re.compile(r'^\|(.+)\|$')
+        footer_re = re.compile(
+            r'^\*{0,2}(备\s*注|指导教师|教研室|年\s+月\s+日)\*{0,2}',
+        )
+
+        # Pre-scan: identify table header rows (row immediately before a separator)
+        stripped_lines = [l.strip() for l in lines]
+        table_header_indices: set = set()
+        for i, sl in enumerate(stripped_lines):
+            if table_sep_re.match(sl) and i > 0 and table_row_re.match(stripped_lines[i - 1]):
+                table_header_indices.add(i - 1)
+
+        cleaned: List[str] = []
+
+        for li, line in enumerate(lines):
+            stripped = stripped_lines[li]
+            if not stripped:
+                continue
+            if separator_re.match(stripped):
+                continue
+            if table_sep_re.match(stripped):
+                continue
+            if li in table_header_indices:
+                continue
+            if footer_re.match(stripped.lstrip('*').strip()):
+                break
+
+            # Convert table data rows to joined plain text
+            tm = table_row_re.match(stripped)
+            if tm:
+                cells = [c.strip() for c in tm.group(1).split('|') if c.strip()]
+                cleaned.append('  '.join(cells))
+                continue
+
+            text = re.sub(r'\*\*([^*]+)\*\*', r'\1', stripped)
+            text = re.sub(r'^#{1,3}\s+', '', text)
+            cleaned.append(text)
+
+        return cleaned
+
+    @staticmethod
+    def _normalise_label(text: str) -> str:
+        """Normalise section label for fuzzy matching: strip spaces/punctuation."""
+        return re.sub(r'\s+', '', text).rstrip('：:')
+
+    def _match_section_label(self, md_label: str,
+                             template_labels: List[str]) -> Optional[str]:
+        """Find the best matching template label for a Markdown section label."""
+        norm_md = self._normalise_label(md_label)
+        # Extract just the numbered prefix + core title for matching
+        m = re.match(r'(\d+[、.．])', md_label)
+        prefix = m.group(1) if m else ''
+
+        best_match = None
+        best_score = 0
+        for tl in template_labels:
+            norm_tl = self._normalise_label(tl)
+            if norm_md == norm_tl:
+                return tl
+            # Prefix match: same section number
+            if prefix and tl.lstrip().startswith(prefix.rstrip()):
+                score = len(set(norm_md) & set(norm_tl)) / max(len(norm_md), len(norm_tl), 1)
+                if score > best_score:
+                    best_score = score
+                    best_match = tl
+        return best_match if best_score > 0.3 else None
+
+    @staticmethod
+    def _para_text(p_el: ET.Element) -> str:
+        """Get concatenated text from a paragraph."""
+        parts = []
+        for t in p_el.iter(f'{NS_W}t'):
+            if t.text:
+                parts.append(t.text)
+        return ''.join(parts)
+
+    @staticmethod
+    def _clone_run_rpr(source_run: ET.Element) -> Optional[ET.Element]:
+        """Deep-copy the w:rPr from a run element."""
+        rPr = source_run.find(f'{NS_W}rPr')
+        if rPr is not None:
+            import copy
+            return copy.deepcopy(rPr)
+        return None
+
+    @staticmethod
+    def _find_content_rpr(para: ET.Element) -> Optional[ET.Element]:
+        """Find the rPr most likely representing the paragraph's *content* formatting.
+
+        Heuristic: the run carrying the most text characters is the actual content
+        run — label prefixes and trailing metadata are typically shorter.
+        Falls back to the last run if no run contains text.
+        """
+        import copy
+        runs = para.findall(f'{NS_W}r')
+        if not runs:
+            return None
+
+        best_run = None
+        best_len = -1
+        for r in runs:
+            text_len = sum(len(t.text or '') for t in r.iter(f'{NS_W}t'))
+            if text_len > best_len:
+                best_len = text_len
+                best_run = r
+
+        if best_run is None:
+            best_run = runs[-1]
+
+        rPr = best_run.find(f'{NS_W}rPr')
+        return copy.deepcopy(rPr) if rPr is not None else None
+
+    def _replace_para_content_runs(self, para: ET.Element,
+                                   new_text: str,
+                                   keep_label_prefix: bool = False,
+                                   label_text: str = '') -> None:
+        """Replace a paragraph's content runs with new text, preserving formatting.
+
+        If keep_label_prefix is True, keeps runs matching label_text and replaces
+        only subsequent runs (for paragraphs where section header and content coexist).
+        """
+        runs = para.findall(f'{NS_W}r')
+        if not runs:
+            return
+
+        # Pick the rPr representing the content area (longest-text heuristic)
+        ref_rpr = self._find_content_rpr(para)
+
+        if keep_label_prefix and label_text:
+            # Find where the label ends in the runs
+            accumulated = ''
+            label_norm = re.sub(r'\s+', '', label_text)
+            split_idx = len(runs)
+            for ri, run in enumerate(runs):
+                for t in run.iter(f'{NS_W}t'):
+                    if t.text:
+                        accumulated += t.text
+                acc_norm = re.sub(r'\s+', '', accumulated)
+                if label_norm and acc_norm.startswith(label_norm):
+                    split_idx = ri + 1
+                    break
+
+            # Remove content runs (after label)
+            for run in runs[split_idx:]:
+                para.remove(run)
+
+            # Add separator space + new content as a single run
+            new_run = ET.SubElement(para, f'{NS_W}r')
+            if ref_rpr is not None:
+                new_run.append(ref_rpr)
+            t = ET.SubElement(new_run, f'{NS_W}t')
+            t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+            t.text = '  ' + new_text
+        else:
+            # Replace ALL runs with new text
+            for run in runs:
+                para.remove(run)
+            new_run = ET.SubElement(para, f'{NS_W}r')
+            if ref_rpr is not None:
+                new_run.append(ref_rpr)
+            t = ET.SubElement(new_run, f'{NS_W}t')
+            t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+            t.text = new_text
+
+    def _create_para_like(self, ref_para: ET.Element, text: str) -> ET.Element:
+        """Create a new paragraph with same pPr/rPr as ref_para, but with new text."""
+        import copy
+        new_p = ET.Element(f'{NS_W}p')
+
+        # Copy paragraph properties
+        pPr = ref_para.find(f'{NS_W}pPr')
+        if pPr is not None:
+            new_p.append(copy.deepcopy(pPr))
+
+        # Use the content-representative rPr from the reference paragraph
+        ref_rpr = self._find_content_rpr(ref_para)
+
+        new_run = ET.SubElement(new_p, f'{NS_W}r')
+        if ref_rpr is not None:
+            new_run.append(ref_rpr)
+        t = ET.SubElement(new_run, f'{NS_W}t')
+        t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+        t.text = text
+        return new_p
+
+    def _fill_template(self, markdown: str, temp_dir: str) -> None:
+        """Fill a form-type template with content from Markdown.
+
+        Instead of generating new document.xml, modifies the template's existing
+        XML in-place — preserving all paragraph/run formatting from the template.
+        """
+        from analyze_template import TemplateAnalyzer
+
+        # Analyse the template to get content structure
+        analyzer = TemplateAnalyzer(self.template_path)
+        cs = analyzer.extract_content_structure()
+        analyzer.close()
+
+        template_sections = cs.get('sections', [])
+        if not template_sections:
+            print("Warning: no numbered sections found in template, "
+                  "falling back to essay mode.", file=sys.stderr)
+            return None  # signal to caller to fall back
+
+        # Parse Markdown into sections
+        md_sections = self._parse_md_sections(markdown)
+
+        # Build label → template section mapping
+        template_labels = [s['label'] for s in template_sections]
+
+        # Register namespace prefixes so ET serializes with correct prefixes
+        ns_registrations = {
+            'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+            'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+            'm': 'http://schemas.openxmlformats.org/officeDocument/2006/math',
+            'w14': 'http://schemas.microsoft.com/office/word/2010/wordml',
+            'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',
+            'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+            'pic': 'http://schemas.openxmlformats.org/drawingml/2006/picture',
+            'mc': 'http://schemas.openxmlformats.org/markup-compatibility/2006',
+            'o': 'urn:schemas-microsoft-com:office:office',
+            'v': 'urn:schemas-microsoft-com:vml',
+            'wpc': 'http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas',
+            'w10': 'urn:schemas-microsoft-com:office:word',
+            'w15': 'http://schemas.microsoft.com/office/word/2012/wordml',
+            'wpg': 'http://schemas.microsoft.com/office/word/2010/wordprocessingGroup',
+            'wpi': 'http://schemas.microsoft.com/office/word/2010/wordprocessingInk',
+            'wne': 'http://schemas.microsoft.com/office/word/2006/wordml',
+            'wps': 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape',
+            'wp14': 'http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing',
+        }
+        for prefix, uri in ns_registrations.items():
+            ET.register_namespace(prefix, uri)
+
+        # Also register any custom namespaces from the template
+        doc_path = os.path.join(temp_dir, 'word', 'document.xml')
+        with open(doc_path, 'r', encoding='utf-8') as f:
+            raw_xml = f.read()
+        for m in re.finditer(r'xmlns:(\w+)="([^"]+)"', raw_xml):
+            prefix, uri = m.group(1), m.group(2)
+            if prefix not in ns_registrations:
+                ET.register_namespace(prefix, uri)
+
+        tree = ET.parse(doc_path)
+        doc_root = tree.getroot()
+        body = doc_root.find(f'{NS_W}body')
+        if body is None:
+            return None
+
+        # Index body children for fast lookup
+        body_children = list(body)
+        idx_to_child: Dict[int, ET.Element] = {}
+        for bi, child in enumerate(body_children):
+            idx_to_child[bi] = child
+
+        # Process each Markdown section
+        for md_label, md_lines in md_sections.items():
+            tmpl_label = self._match_section_label(md_label, template_labels)
+            if tmpl_label is None:
+                print(f"Warning: no template section matches '{md_label[:40]}', skipping.",
+                      file=sys.stderr)
+                continue
+
+            # Find the template section info
+            sec_info = next(s for s in template_sections if s['label'] == tmpl_label)
+            content_indices = sec_info['content_para_indices']
+            header_has_content = sec_info['header_has_content']
+            header_idx = sec_info['header_para_index']
+
+            # Clean and filter content lines
+            new_paragraphs = self._clean_form_content(md_lines)
+            if not new_paragraphs:
+                continue
+
+            if header_has_content:
+                # Section header + content in same paragraph
+                header_para = idx_to_child.get(header_idx)
+                if header_para is None:
+                    continue
+                # Replace content runs in header para, keep label prefix
+                self._replace_para_content_runs(
+                    header_para, new_paragraphs[0],
+                    keep_label_prefix=True,
+                    label_text=tmpl_label)
+                extra_paragraphs = new_paragraphs[1:]
+
+                if extra_paragraphs:
+                    # Insert additional paragraphs after header
+                    insert_pos = list(body).index(header_para) + 1
+                    for ep_text in reversed(extra_paragraphs):
+                        new_p = self._create_para_like(header_para, ep_text)
+                        body.insert(insert_pos, new_p)
+            else:
+                # Content in separate paragraphs
+                if not content_indices:
+                    continue
+
+                # Get reference formatting from first content paragraph
+                first_content_para = idx_to_child.get(content_indices[0])
+                if first_content_para is None:
+                    continue
+
+                # Determine insert position (position of first content paragraph)
+                insert_pos = list(body).index(first_content_para)
+
+                # Remove old content paragraphs
+                for ci in content_indices:
+                    old_para = idx_to_child.get(ci)
+                    if old_para is not None and old_para in list(body):
+                        body.remove(old_para)
+
+                # Insert new content paragraphs at the same position
+                for pi, para_text in enumerate(new_paragraphs):
+                    new_p = self._create_para_like(first_content_para, para_text)
+                    body.insert(insert_pos + pi, new_p)
+
+        # Write back modified document.xml with proper namespace prefixes
+        xml_str = ET.tostring(doc_root, encoding='unicode', xml_declaration=False)
+
+        # Fix any remaining nsN: prefixes that ET might generate
+        for i in range(20):
+            prefix = f'ns{i}'
+            # Find what URI this nsN maps to
+            m_uri = re.search(rf'xmlns:{prefix}="([^"]+)"', xml_str)
+            if not m_uri:
+                continue
+            uri = m_uri.group(1)
+            # Find the correct prefix for this URI
+            correct = None
+            for p, u in ns_registrations.items():
+                if u == uri:
+                    correct = p
+                    break
+            if correct and correct != prefix:
+                xml_str = xml_str.replace(f'xmlns:{prefix}=', f'xmlns:{correct}=')
+                xml_str = xml_str.replace(f'<{prefix}:', f'<{correct}:')
+                xml_str = xml_str.replace(f'</{prefix}:', f'</{correct}:')
+                xml_str = xml_str.replace(f' {prefix}:', f' {correct}:')
+
+        with open(doc_path, 'w', encoding='utf-8') as f:
+            f.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
+            f.write(xml_str)
+
+        return True  # success
+
+    # ------------------------------------------------------------------
+    # Main conversion entry point
+    # ------------------------------------------------------------------
+
     def convert(self, markdown_content: str, output_path: str):
         temp_dir = '/tmp/docx_ew_' + hashlib.md5(output_path.encode()).hexdigest()[:8]
         if os.path.exists(temp_dir):
@@ -1702,39 +2132,49 @@ class MarkdownToDocxConverter:
         with zipfile.ZipFile(self.template_path, 'r') as z:
             z.extractall(temp_dir)
 
-        # Dynamic format extraction — no hardcoded values
-        self.tmpl_fmt = extract_template_formats(temp_dir)
+        # Detect document type: form vs essay
+        is_form = self._is_form_template(temp_dir)
 
-        sx = StyleExtractor(temp_dir)
-        self._heading_ids = sx.heading_ids()
-        self._body_id = self.tmpl_fmt.get('body_style_id', '') or sx.body_style_id()
-        self._formula_id = sx.find_style_id('formula', '公式', 'Equation')
-        self._ref_style_id = self.tmpl_fmt.get('reference_style_id', '')
-        self._image_style_id = self.tmpl_fmt.get('image_style_id', '')
-        self._table_style = self.tmpl_fmt.get('table_style_id', '') or sx.find_style_id(
-            'Normal Table', '普通表格', 'Table Grid', '网格型')
-        self._sect_pr_xml = sx.extract_sect_pr_xml()
-        self._image_rels = []
+        if is_form:
+            result = self._fill_template(markdown_content, temp_dir)
+            if result is None:
+                # Fallback to essay mode if form fill fails
+                is_form = False
 
-        font_hint = self.tmpl_fmt.get('font_hint', '')
-        self.latex_converter = LatexToOmmlConverter(font_hint=font_hint)
+        if not is_form:
+            # Essay mode: generate new document.xml from Markdown
+            self.tmpl_fmt = extract_template_formats(temp_dir)
 
-        doc_xml = self._generate_document_xml(markdown_content)
-        doc_path = os.path.join(temp_dir, 'word', 'document.xml')
-        with open(doc_path, 'w', encoding='utf-8') as f:
-            f.write(doc_xml)
+            sx = StyleExtractor(temp_dir)
+            self._heading_ids = sx.heading_ids()
+            self._body_id = self.tmpl_fmt.get('body_style_id', '') or sx.body_style_id()
+            self._formula_id = sx.find_style_id('formula', '公式', 'Equation')
+            self._ref_style_id = self.tmpl_fmt.get('reference_style_id', '')
+            self._image_style_id = self.tmpl_fmt.get('image_style_id', '')
+            self._table_style = self.tmpl_fmt.get('table_style_id', '') or sx.find_style_id(
+                'Normal Table', '普通表格', 'Table Grid', '网格型')
+            self._sect_pr_xml = sx.extract_sect_pr_xml()
+            self._image_rels = []
 
-        # Copy image files into word/media/
-        media_dir = os.path.join(temp_dir, 'word', 'media')
-        os.makedirs(media_dir, exist_ok=True)
-        for img_rel in self._image_rels:
-            src = img_rel.get('src_path', '')
-            if src and os.path.isfile(src):
-                shutil.copy2(src, os.path.join(media_dir, img_rel['media_name']))
+            font_hint = self.tmpl_fmt.get('font_hint', '')
+            self.latex_converter = LatexToOmmlConverter(font_hint=font_hint)
 
-        if self._image_rels:
-            self._update_rels(temp_dir)
-            self._update_content_types(temp_dir)
+            doc_xml = self._generate_document_xml(markdown_content)
+            doc_path = os.path.join(temp_dir, 'word', 'document.xml')
+            with open(doc_path, 'w', encoding='utf-8') as f:
+                f.write(doc_xml)
+
+            # Copy image files into word/media/
+            media_dir = os.path.join(temp_dir, 'word', 'media')
+            os.makedirs(media_dir, exist_ok=True)
+            for img_rel in self._image_rels:
+                src = img_rel.get('src_path', '')
+                if src and os.path.isfile(src):
+                    shutil.copy2(src, os.path.join(media_dir, img_rel['media_name']))
+
+            if self._image_rels:
+                self._update_rels(temp_dir)
+                self._update_content_types(temp_dir)
 
         with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             for root_d, _dirs, files in os.walk(temp_dir):
@@ -1744,7 +2184,8 @@ class MarkdownToDocxConverter:
                     zf.write(fp, arcname)
 
         shutil.rmtree(temp_dir)
-        print(f"Converted to: {output_path}")
+        mode_str = "form-fill" if is_form else "essay"
+        print(f"Converted ({mode_str} mode) to: {output_path}")
 
     def _update_content_types(self, temp_dir: str):
         ct_path = os.path.join(temp_dir, '[Content_Types].xml')

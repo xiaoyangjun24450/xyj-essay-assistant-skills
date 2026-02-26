@@ -41,9 +41,12 @@ All scripts are self-contained under `skills/docx-essay-writer/scripts/`.
 
 Always run `analyze_template.py` first. Never start writing content without understanding the template structure.
 
-### Rule 2: Match the Outline
+### Rule 2: Match the Template Structure
 
-The Markdown's heading hierarchy must correspond 1-to-1 with the template's outline. Do not add or remove sections unless the user explicitly requests it.
+- **Essay templates** (with heading hierarchy): Markdown heading levels must correspond 1-to-1 with the template's outline.
+- **Form templates** (no heading hierarchy): Markdown section labels must match the template's numbered sections exactly. Do not repeat section header text as content.
+
+Do not add or remove sections unless the user explicitly requests it.
 
 ### Rule 3: Use Built-in Reference Search
 
@@ -58,14 +61,18 @@ python3 skills/docx-essay-writer/scripts/analyze_template.py <template.docx>
 ```
 
 Output is JSON containing:
-- `outline` — heading hierarchy with section titles and special elements
+- `document_type` — `"essay"` (heading-based) or `"form"` (no headings, numbered sections)
+- `outline` — heading hierarchy with section titles and special elements (essay type)
+- `content_structure` — numbered sections with labels and sample content (form type)
 - `style_map` — all style names → styleId mappings
 - `page_layout` — margins, page size, header/footer references
 - `special_elements` — counts of tables, formulas, images, references
 
-Review the outline carefully before proceeding.
+**Check `document_type` first** — it determines which Phase 2 variant to use.
 
 ### Phase 2: Generate Markdown
+
+#### Phase 2A: Essay Templates (`document_type: "essay"`)
 
 Based on the analysis output, write Markdown content that:
 
@@ -119,11 +126,54 @@ for ref in refs:
     print(ref)
 ```
 
+#### Phase 2B: Form Templates (`document_type: "form"`)
+
+The `content_structure` in the analysis output shows numbered sections with their labels and sample content. Write Markdown where:
+
+- Each section uses `## N、section_label` as a delimiter (matching `content_structure.sections[].label`)
+- Content under each section replaces the template's sample content
+- Do **NOT** repeat the section header text or question text as content
+- Do **NOT** use `---` horizontal rules or Markdown table syntax
+- Write each sub-item (e.g. `（1）...`, `（2）...`) as a separate line
+- For time allocation sections, write each item as a plain line: `第一部分 内容描述  ( N 周)`
+
+Example form Markdown:
+
+```markdown
+## 1、本设计（论文）的目的、意义
+
+随着新能源汽车的快速发展，FOC控制技术...本毕业设计的目的是...
+
+## 2、学生应完成的任务
+
+（1）系统性地调研FOC矢量控制技术...
+（2）深入研究电机参数辨识方法...
+（3）完成ESP32硬件电路的设计...
+（4）研究并实现FOC核心算法...
+（5）开发电机控制固件...
+（6）撰写论文，制作答辩PPT，完成本科答辩。
+
+## 3、本设计（论文）与本专业的毕业要求达成度如何？
+
+（1）培养学生综合运用学科基础理论和专业知识...
+（2）能够针对任务书要求设计复杂工程问题的解决方案...
+
+## 4、本设计（论文）各部分内容及时间分配
+
+第一部分 收集资料与阅读，撰写开题报告；  ( 2 周)
+第二部分 完成算法理论学习与仿真验证；  ( 2 周)
+```
+
 ### Phase 3: User Review
 
 Present the complete Markdown to the user. Wait for confirmation or modification requests. Iterate until the user is satisfied.
 
 ### Phase 4: Convert to DOCX
+
+The converter **automatically detects** the template type and uses the appropriate strategy:
+
+- **Essay mode**: generates new `document.xml` from Markdown (heading-based templates)
+- **Form-fill mode**: modifies the template's existing XML in-place, preserving all paragraph/run formatting (form-based templates)
 
 ```bash
 python3 skills/docx-essay-writer/scripts/md_to_docx.py \
@@ -174,8 +224,10 @@ Checks: page margins, page size, headers/footers, styles, spacing.
 ### `scripts/analyze_template.py`
 
 - `TemplateAnalyzer(docx_path)` — main class
-  - `analyze()` → full JSON analysis
-  - `extract_outline()` → heading hierarchy
+  - `analyze()` → full JSON analysis (includes `document_type` and `content_structure` for forms)
+  - `detect_document_type()` → `"essay"` or `"form"`
+  - `extract_outline()` → heading hierarchy (essay templates)
+  - `extract_content_structure()` → numbered sections with labels, indices, sample content (form templates)
   - `extract_style_map()` → style name/ID map
   - `extract_page_layout()` → margins, size, header/footer refs
   - `extract_special_elements()` → table/formula/image/reference counts
@@ -189,7 +241,7 @@ Checks: page margins, page size, headers/footers, styles, spacing.
 ### `scripts/md_to_docx.py`
 
 - `MarkdownToDocxConverter(template_path)` — main class
-  - `convert(markdown_content, output_path)` — full conversion
+  - `convert(markdown_content, output_path)` — auto-detects template type, uses essay or form-fill mode
 
 ### `scripts/verify_format.py`
 
@@ -197,16 +249,31 @@ Checks: page margins, page size, headers/footers, styles, spacing.
 
 ## Example Usage
 
+### Essay Example
+
 ```
 参考 test_cases/Southwest Jiaotong University Thesis Template/正文.docx 的格式，
 编写一篇关于"基于ESP32的无感FOC驱动设计"的绪论，要求有参考文献、公式、表格。
 ```
 
 The AI will:
-1. Run `analyze_template.py` on `正文.docx`
-2. Generate Markdown with matching structure, including LaTeX formulas, Markdown tables, and real references from OpenAlex
+1. Run `analyze_template.py` → detects `document_type: "essay"`, gets heading outline
+2. Generate Markdown with matching heading structure (Phase 2A)
 3. Present for review
-4. Convert to DOCX and verify formatting
+4. Convert to DOCX (essay mode) and verify formatting
+
+### Form Example
+
+```
+参考 test_cases/Southwest Jiaotong University Thesis Template/任务书.docx 的格式，
+编写"基于ESP32的FOC控制"的毕业设计任务书。
+```
+
+The AI will:
+1. Run `analyze_template.py` → detects `document_type: "form"`, gets `content_structure` with sections
+2. Generate Markdown with matching section labels (Phase 2B)
+3. Present for review
+4. Convert to DOCX (form-fill mode, preserving all original formatting)
 
 ## Troubleshooting
 
