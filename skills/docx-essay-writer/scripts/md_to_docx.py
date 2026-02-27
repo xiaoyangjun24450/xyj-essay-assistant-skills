@@ -1261,6 +1261,69 @@ class MarkdownToDocxConverter:
                 t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
             t.text = seg
 
+    def _add_cell_rich_runs(self, p: ET.Element, text: str,
+                            cell_rPr_tmpl: Optional[Dict] = None,
+                            bold: bool = False):
+        """Handle **bold**, *italic* and $inline formula$ in table cell text.
+
+        Adds w:r or m:oMath elements to paragraph p.
+        """
+        hint = self.tmpl_fmt.get('font_hint', '')
+        cell_rPr_tmpl = cell_rPr_tmpl or {}
+
+        def _apply_cell_format(rPr: ET.Element):
+            """Apply cell-level formatting from template."""
+            if hint:
+                rF = ET.SubElement(rPr, f'{NS_W}rFonts')
+                rF.set(f'{NS_W}hint', hint)
+            # Bold from template or row header flag
+            if cell_rPr_tmpl.get('b') is not None:
+                b_info = cell_rPr_tmpl['b']
+                b_el = ET.SubElement(rPr, f'{NS_W}b')
+                if isinstance(b_info, dict) and 'val' in b_info:
+                    b_el.set(f'{NS_W}val', b_info['val'])
+            elif bold:
+                ET.SubElement(rPr, f'{NS_W}b')
+            # Other formatting
+            for rpr_name in ('color', 'sz', 'szCs', 'vertAlign'):
+                rpr_info = cell_rPr_tmpl.get(rpr_name)
+                if rpr_info and isinstance(rpr_info, dict):
+                    el = ET.SubElement(rPr, f'{NS_W}{rpr_name}')
+                    for attr, val in rpr_info.items():
+                        el.set(f'{NS_W}{attr}', val)
+
+        # First split by inline formulas
+        parts = re.split(r'(\$[^$]+\$)', text)
+
+        for part in parts:
+            if part.startswith('$') and part.endswith('$'):
+                # Inline formula - convert to OMML and append
+                omml = self.latex_converter.convert(part[1:-1])
+                if omml is not None:
+                    p.append(omml)
+            else:
+                # Regular text - process bold/italic like _add_rich_runs
+                segments = re.split(r'(\*\*[^*]+\*\*|\*[^*]+\*)', part)
+                for seg in segments:
+                    if not seg:
+                        continue
+                    r = ET.SubElement(p, f'{NS_W}r')
+                    rPr = ET.SubElement(r, f'{NS_W}rPr')
+                    _apply_cell_format(rPr)
+
+                    # Check for bold/italic markers
+                    content = seg
+                    if seg.startswith('**') and seg.endswith('**'):
+                        ET.SubElement(rPr, f'{NS_W}b')
+                        content = seg[2:-2]
+                    elif seg.startswith('*') and seg.endswith('*'):
+                        ET.SubElement(rPr, f'{NS_W}i')
+                        content = seg[1:-1]
+                    t = ET.SubElement(r, f'{NS_W}t')
+                    if content.startswith(' ') or content.endswith(' '):
+                        t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+                    t.text = content
+
     def _formula_para(self, formula: str) -> ET.Element:
         p = ET.Element(f'{NS_W}p')
         p.set(f'{NS_W14}paraId', self._next_para_id())
@@ -1590,27 +1653,8 @@ class MarkdownToDocxConverter:
                             for attr, val in rpr_info.items():
                                 el.set(f'{NS_W}{attr}', val)
 
-            r = ET.SubElement(p, f'{NS_W}r')
-            rPr = ET.SubElement(r, f'{NS_W}rPr')
-            if hint:
-                rF = ET.SubElement(rPr, f'{NS_W}rFonts')
-                rF.set(f'{NS_W}hint', hint)
-            if cell_rPr_tmpl.get('b') is not None:
-                b_info = cell_rPr_tmpl['b']
-                b_el = ET.SubElement(rPr, f'{NS_W}b')
-                if isinstance(b_info, dict) and 'val' in b_info:
-                    b_el.set(f'{NS_W}val', b_info['val'])
-            elif bold:
-                ET.SubElement(rPr, f'{NS_W}b')
-            for rpr_name in ('color', 'sz', 'szCs', 'vertAlign'):
-                rpr_info = cell_rPr_tmpl.get(rpr_name)
-                if rpr_info and isinstance(rpr_info, dict):
-                    el = ET.SubElement(rPr, f'{NS_W}{rpr_name}')
-                    for attr, val in rpr_info.items():
-                        el.set(f'{NS_W}{attr}', val)
-
-            t = ET.SubElement(r, f'{NS_W}t')
-            t.text = cell_text
+            # Process cell text with inline formula support
+            self._add_cell_rich_runs(p, cell_text, cell_rPr_tmpl, bold)
 
     # ------------------------------------------------------------------
     # Image
