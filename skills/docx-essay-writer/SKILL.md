@@ -61,14 +61,17 @@ python3 skills/docx-essay-writer/scripts/analyze_template.py <template.docx>
 ```
 
 Output is JSON containing:
-- `document_type` — `"essay"` (heading-based) or `"form"` (no headings, numbered sections)
+- `document_type` — `"essay"` (heading-based), `"form"` (numbered sections), or `"complex"` (multi-section/cover pages)
 - `outline` — heading hierarchy with section titles and special elements (essay type)
 - `content_structure` — numbered sections with labels and sample content (form type)
 - `style_map` — all style names → styleId mappings
 - `page_layout` — margins, page size, header/footer references
 - `special_elements` — counts of tables, formulas, images, references
 
-**Check `document_type` first** — it determines which Phase 2 variant to use.
+**Check `document_type` first** — it determines which Phase 2 variant to use:
+- `essay` → Use heading hierarchy (Phase 2A)
+- `form` → Use numbered sections (Phase 2B)  
+- `complex` → Use placeholder-based content (Phase 2C)
 
 ### Phase 2: Generate Markdown
 
@@ -164,6 +167,62 @@ Example form Markdown:
 第二部分 完成算法理论学习与仿真验证；  ( 2 周)
 ```
 
+#### Phase 2C: Complex Templates (`document_type: "complex"`)
+
+Complex templates include cover pages, multi-section documents with multiple headers/footers, or documents with complex table layouts. The converter automatically preserves all document structure (sectPr, tables, images) and performs text replacement based on placeholder matching.
+
+Write Markdown using descriptive headers that map to template placeholders:
+
+| Markdown Header | Maps To Template Field |
+|----------------|------------------------|
+| `## 题目` / `## 标题` | Document title |
+| `## 英文标题` | English title |
+| `## 学院` / `## 系别` | School/Department |
+| `## 专业` | Major |
+| `## 年级` | Grade/Year |
+| `## 学号` | Student ID |
+| `## 姓名` | Student name |
+| `## 指导教师` | Advisor |
+| `## 日期` | Date |
+| `## 摘要` | Abstract |
+| `## 关键词` | Keywords |
+
+Example complex template Markdown:
+
+```markdown
+## 题目
+
+基于ESP32的无刷电机FOC控制系统设计
+
+## 英文标题
+
+Design of FOC Control System for Brushless Motor Based on ESP32
+
+## 学院
+
+物理与信息工程学院
+
+## 专业
+
+物联网工程
+
+## 姓名
+
+张三
+
+## 学号
+
+20210001
+
+## 指导教师
+
+李四 教授
+
+## 日期
+
+二〇二五年五月
+```
+
 ### Phase 3: User Review
 
 Present the complete Markdown to the user. Wait for confirmation or modification requests. Iterate until the user is satisfied.
@@ -173,7 +232,8 @@ Present the complete Markdown to the user. Wait for confirmation or modification
 The converter **automatically detects** the template type and uses the appropriate strategy:
 
 - **Essay mode**: generates new `document.xml` from Markdown (heading-based templates)
-- **Form-fill mode**: modifies the template's existing XML in-place, preserving all paragraph/run formatting (form-based templates)
+- **Form-fill mode**: modifies the template's existing XML in-place, preserving all paragraph/run formatting (form-based templates with numbered sections)
+- **Complex mode**: preserves entire document structure including multiple sections (sectPr), tables, headers/footers; performs placeholder-based text replacement (cover pages, complex layouts)
 
 ```bash
 python3 skills/docx-essay-writer/scripts/md_to_docx.py \

@@ -1742,25 +1742,409 @@ class MarkdownToDocxConverter:
     # Document type detection
     # ------------------------------------------------------------------
 
-    def _is_form_template(self, temp_dir: str) -> bool:
-        """Check if template is form-type (no heading-style paragraphs in body)."""
+    def _detect_template_type(self, temp_dir: str) -> str:
+        """Detect template type: 'essay', 'form', or 'complex'.
+        
+        'essay': heading-based documents with clear outline.
+        'form': simple numbered sections like '1、xxx'.
+        'complex': complex structures (multiple sectPr, complex tables, cover pages).
+        """
         sx = StyleExtractor(temp_dir)
         heading_sids = set(sx.heading_ids().values())
-        if not heading_sids:
-            return True
         doc_root = sx.doc_root
+        
         if doc_root is None:
-            return True
+            return 'form'
+        
         body = doc_root.find(f'{NS_W}body')
         if body is None:
-            return True
+            return 'form'
+        
+        # Check for heading-based content (essay type)
+        has_headings = False
         for p in body.findall(f'{NS_W}p'):
             pPr = p.find(f'{NS_W}pPr')
             if pPr is not None:
                 ps = pPr.find(f'{NS_W}pStyle')
                 if ps is not None and ps.get(f'{NS_W}val', '') in heading_sids:
-                    return False
+                    has_headings = True
+                    break
+        
+        if has_headings:
+            return 'essay'
+        
+        # Check for complex structures
+        sect_pr_count = len(body.findall(f'{NS_W}sectPr'))
+        # Also check for sectPr in paragraphs
+        for p in body.findall(f'{NS_W}p'):
+            pPr = p.find(f'{NS_W}pPr')
+            if pPr is not None:
+                if pPr.find(f'{NS_W}sectPr') is not None:
+                    sect_pr_count += 1
+        
+        # Multiple sections = complex document
+        if sect_pr_count > 1:
+            return 'complex'
+        
+        # Many tables = complex document  
+        tbl_count = len(body.findall(f'{NS_W}tbl'))
+        if tbl_count > 2:
+            return 'complex'
+        
+        return 'form'
+
+    # ------------------------------------------------------------------
+    # Complex-mode: structure-preserving fill
+    # ------------------------------------------------------------------
+
+    def _preserve_structure_fill(self, markdown: str, temp_dir: str) -> bool:
+        """Fill a complex template preserving ALL original structure.
+        
+        For complex documents (cover pages, multi-section forms), this method:
+        1. Keeps the entire original document.xml structure
+        2. Replaces placeholder text with content from Markdown
+        3. Preserves all sectPr, tables, images, headers/footers
+        
+        Placeholder strategy: Find paragraphs with common placeholder patterns
+        and replace them with corresponding Markdown content.
+        """
+        import copy
+        
+        doc_path = os.path.join(temp_dir, 'word', 'document.xml')
+        if not os.path.isfile(doc_path):
+            return False
+        
+        # Parse and clean content from Markdown
+        content_map = self._extract_content_map(markdown)
+        if not content_map:
+            return False
+        
+        # Register namespaces
+        ns_registrations = {
+            'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+            'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+            'm': 'http://schemas.openxmlformats.org/officeDocument/2006/math',
+            'w14': 'http://schemas.microsoft.com/office/word/2010/wordml',
+            'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',
+            'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+            'pic': 'http://schemas.openxmlformats.org/drawingml/2006/picture',
+            'mc': 'http://schemas.openxmlformats.org/markup-compatibility/2006',
+            'o': 'urn:schemas-microsoft-com:office:office',
+            'v': 'urn:schemas-microsoft-com:vml',
+            'wpc': 'http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas',
+            'w10': 'urn:schemas-microsoft-com:office:word',
+            'w15': 'http://schemas.microsoft.com/office/word/2012/wordml',
+            'wpg': 'http://schemas.microsoft.com/office/word/2010/wordprocessingGroup',
+            'wpi': 'http://schemas.microsoft.com/office/word/2010/wordprocessingInk',
+            'wne': 'http://schemas.microsoft.com/office/word/2006/wordml',
+            'wps': 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape',
+            'wpsCustomData': 'http://www.wps.cn/officeDocument/2013/wpsCustomData',
+            'wp14': 'http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing',
+        }
+        for prefix, uri in ns_registrations.items():
+            ET.register_namespace(prefix, uri)
+        
+        # Also register any custom namespaces from the template
+        with open(doc_path, 'r', encoding='utf-8') as f:
+            raw_xml = f.read()
+        for m in re.finditer(r'xmlns:(\w+)="([^"]+)"', raw_xml):
+            prefix, uri = m.group(1), m.group(2)
+            if prefix not in ns_registrations:
+                ET.register_namespace(prefix, uri)
+        
+        tree = ET.parse(doc_path)
+        doc_root = tree.getroot()
+        body = doc_root.find(f'{NS_W}body')
+        if body is None:
+            return False
+        
+        # Strategy: Find paragraphs that match placeholder patterns
+        # and replace their text content while preserving all formatting
+        # Note: \s* handles spaces within labels like "年   级："
+        placeholder_patterns = [
+            # Common Chinese placeholder patterns (with optional spaces in labels)
+            (r'^(论文|毕业设计|课程设计)?\s*[（(]?\s*题\s*目\s*[)）]?\s*[：:]\s*', 'title'),
+            (r'^.*?题\s*目\s*[：:]', 'title'),
+            (r'^(学院|系别|单位)\s*[：:]', 'school'),
+            (r'^专\s*业\s*[：:]', 'major'),
+            (r'^年\s*级\s*[：:]', 'grade'),
+            (r'^学\s*号\s*[：:]', 'student_id'),
+            (r'^姓\s*名\s*[：:]', 'name'),
+            (r'^(指导教师|导师|教师|指导老师)\s*[：:]', 'advisor'),
+            (r'^(日期|时间|年月日)\s*[：:]', 'date'),
+            (r'^(作者签名|学生签名)\s*[：:]', 'signature_student'),
+            (r'^指导教师签名\s*[：:]', 'signature_advisor'),
+            (r'^(中文|英文)?\s*(摘要|提要)', 'abstract'),
+            (r'^Abstract', 'abstract_en'),
+            (r'^Key\s*words\s*[：:]', 'keywords'),
+            (r'^(关键|关键)词\s*[：:]', 'keywords'),
+            (r'^[（(]\s*\d+\s*[）)]', 'numbered_item'),  # （1）、（2）等
+        ]
+        
+        # Title detection: find paragraphs that look like titles
+        # (long text without common label markers, in the first part of document)
+        title_indicators = ['本科毕业设计', '本科毕业论文', '硕士论文', '博士论文']
+        title_para_indices = []
+        
+        # Track which content keys have been used
+        used_keys = set()
+        
+        # First pass: identify potential title paragraphs (Chinese and English)
+        # Title is typically a long paragraph after "本科毕业设计（论文）" and before labels
+        all_paras = list(body.iter(f'{NS_W}p'))
+        title_para_idx = None
+        title_en_para_idx = None
+        
+        for i, p in enumerate(all_paras[:15]):  # Check first 15 paragraphs
+            para_text = self._para_text(p).strip()
+            if any(ind in para_text for ind in title_indicators):
+                # Title should be in the next few paragraphs
+                for j in range(i+1, min(i+6, len(all_paras))):
+                    next_text = self._para_text(all_paras[j]).strip()
+                    # Title: long text without label markers
+                    if len(next_text) > 10 and not any(re.search(pat, next_text) for pat, _ in placeholder_patterns):
+                        # Check if it looks like a title (not too long, no special chars)
+                        if len(next_text) < 100 and '：' not in next_text and ':' not in next_text:
+                            title_para_idx = j
+                            # English title is typically the next paragraph after Chinese title
+                            if j + 1 < len(all_paras):
+                                en_text = self._para_text(all_paras[j + 1]).strip()
+                                # English title: mostly ASCII letters, longer than 10 chars
+                                if len(en_text) > 10 and sum(1 for c in en_text if ord(c) < 128) / len(en_text) > 0.8:
+                                    title_en_para_idx = j + 1
+                            break
+                break
+        
+        # Collect all paragraphs that are inside tables to skip them in main loop
+        paras_in_tables = set()
+        for tbl in body.iter(f'{NS_W}tbl'):
+            for p in tbl.iter(f'{NS_W}p'):
+                paras_in_tables.add(id(p))
+        
+        # Process all paragraphs in body (excluding table cells)
+        for idx, p in enumerate(all_paras):
+            # Skip paragraphs inside tables - they will be handled separately
+            if id(p) in paras_in_tables:
+                continue
+                
+            para_text = self._para_text(p).strip()
+            if not para_text:
+                continue
+            
+            # Check if this is the Chinese title paragraph
+            if idx == title_para_idx and 'title' in content_map and 'title' not in used_keys:
+                new_text = content_map['title']
+                self._replace_para_text_preserving_format(p, new_text)
+                used_keys.add('title')
+                continue
+            
+            # Check if this is the English title paragraph
+            if idx == title_en_para_idx and 'title_en' in content_map and 'title_en' not in used_keys:
+                new_text = content_map['title_en']
+                self._replace_para_text_preserving_format(p, new_text)
+                used_keys.add('title_en')
+                continue
+            
+            # Try to match paragraph against placeholder patterns
+            matched_key = None
+            match_obj = None
+            for pattern, key in placeholder_patterns:
+                match_obj = re.search(pattern, para_text, re.IGNORECASE)
+                if match_obj:
+                    matched_key = key
+                    break
+            
+            if matched_key and matched_key in content_map:
+                new_content = content_map[matched_key]
+                # For labels with content (like "年级：2021"), keep the label part
+                if match_obj and match_obj.end() < len(para_text):
+                    # There's text after the match - replace only that part
+                    label_part = para_text[:match_obj.end()]
+                    new_text = label_part + new_content
+                else:
+                    new_text = new_content
+                self._replace_para_text_preserving_format(p, new_text)
+                used_keys.add(matched_key)
+        
+        # Process tables - handle label/content pairs in adjacent cells
+        for tbl in body.iter(f'{NS_W}tbl'):
+            rows = list(tbl.findall(f'{NS_W}tr'))
+            for row in rows:
+                cells = list(row.findall(f'{NS_W}tc'))
+                for i, tc in enumerate(cells):
+                    # Get text from this cell
+                    cell_texts = []
+                    for p in tc.findall(f'{NS_W}p'):
+                        for t in p.iter(f'{NS_W}t'):
+                            if t.text:
+                                cell_texts.append(t.text)
+                    cell_text = ''.join(cell_texts).strip()
+                    
+                    # Try to match this cell's text against patterns
+                    matched_key = None
+                    for pattern, key in placeholder_patterns:
+                        if re.search(pattern, cell_text, re.IGNORECASE):
+                            matched_key = key
+                            break
+                    
+                    if matched_key and matched_key in content_map and matched_key not in used_keys:
+                        # Check if there's a next cell that should contain the value
+                        if i + 1 < len(cells):
+                            next_tc = cells[i + 1]
+                            # Find paragraph in next cell to fill
+                            next_paras = list(next_tc.findall(f'{NS_W}p'))
+                            if next_paras:
+                                target_p = next_paras[0]
+                                new_content = content_map[matched_key]
+                                self._replace_para_text_preserving_format(target_p, new_content)
+                                used_keys.add(matched_key)
+        
+        # Write back the modified document.xml
+        xml_str = ET.tostring(doc_root, encoding='unicode', xml_declaration=False)
+        
+        # Fix any namespace issues
+        for i in range(20):
+            prefix = f'ns{i}'
+            m_uri = re.search(rf'xmlns:{prefix}="([^"]+)"', xml_str)
+            if not m_uri:
+                continue
+            uri = m_uri.group(1)
+            correct = None
+            for p, u in ns_registrations.items():
+                if u == uri:
+                    correct = p
+                    break
+            if correct and correct != prefix:
+                xml_str = xml_str.replace(f'xmlns:{prefix}=', f'xmlns:{correct}=')
+                xml_str = xml_str.replace(f'<{prefix}:', f'<{correct}:')
+                xml_str = xml_str.replace(f'</{prefix}:', f'</{correct}:')
+                xml_str = xml_str.replace(f' {prefix}:', f' {correct}:')
+        
+        with open(doc_path, 'w', encoding='utf-8') as f:
+            f.write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n')
+            f.write(xml_str)
+        
         return True
+    
+    def _extract_content_map(self, markdown: str) -> Dict[str, str]:
+        """Extract content mapping from Markdown for complex template filling.
+        
+        Returns a dict mapping content keys to content values.
+        """
+        content_map = {}
+        lines = markdown.split('\n')
+        
+        # Common section headers and their corresponding keys
+        section_mapping = {
+            '标题': 'title',
+            '题目': 'title',
+            '标题英文': 'title_en',
+            '英文标题': 'title_en',
+            '学院': 'school',
+            '专业': 'major',
+            '年级': 'grade',
+            '学号': 'student_id',
+            '姓名': 'name',
+            '指导教师': 'advisor',
+            '日期': 'date',
+            '签名': 'signature',
+            '摘要': 'abstract',
+            '关键词': 'keywords',
+        }
+        
+        current_key = None
+        current_content = []
+        
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                if current_key and current_content:
+                    content_map[current_key] = '\n'.join(current_content).strip()
+                    current_content = []
+                continue
+            
+            # Check for section headers (## Header or plain text)
+            header_match = re.match(r'^#{1,3}\s+(.+)$', stripped)
+            if header_match:
+                # Save previous content
+                if current_key and current_content:
+                    content_map[current_key] = '\n'.join(current_content).strip()
+                    current_content = []
+                
+                header_text = header_match.group(1).strip()
+                # Map header to key (sort by length descending to prioritize longer matches)
+                for cn in sorted(section_mapping.keys(), key=len, reverse=True):
+                    if cn in header_text:
+                        current_key = section_mapping[cn]
+                        break
+                continue
+            
+            # Also check for bare headers without # (sort by length descending)
+            for cn in sorted(section_mapping.keys(), key=len, reverse=True):
+                if stripped.startswith(cn) and len(stripped) < 30:
+                    if current_key and current_content:
+                        content_map[current_key] = '\n'.join(current_content).strip()
+                        current_content = []
+                    current_key = key
+                    # If there's content after the header on same line
+                    remaining = stripped[len(cn):].strip().lstrip('：:').strip()
+                    if remaining:
+                        current_content.append(remaining)
+                    break
+            else:
+                if current_key:
+                    current_content.append(stripped)
+        
+        # Save last section
+        if current_key and current_content:
+            content_map[current_key] = '\n'.join(current_content).strip()
+        
+        return content_map
+    
+    def _replace_para_text_preserving_format(self, para: ET.Element, new_text: str):
+        """Replace all text in a paragraph while preserving all formatting."""
+        import copy
+        
+        # Find all runs in the paragraph
+        runs = para.findall(f'{NS_W}r')
+        if not runs:
+            # No runs - create a new run with text
+            new_run = ET.SubElement(para, f'{NS_W}r')
+            t = ET.SubElement(new_run, f'{NS_W}t')
+            if ' ' in new_text:
+                t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+            t.text = new_text
+            return
+        
+        # Find the "content" run (the one with most text)
+        content_run = None
+        max_len = 0
+        for r in runs:
+            text_len = sum(len(t.text or '') for t in r.iter(f'{NS_W}t'))
+            if text_len > max_len:
+                max_len = text_len
+                content_run = r
+        
+        if content_run is None:
+            content_run = runs[0]
+        
+        # Get the formatting (rPr) from the content run
+        rPr = content_run.find(f'{NS_W}rPr')
+        rPr_copy = copy.deepcopy(rPr) if rPr is not None else None
+        
+        # Remove all runs
+        for r in list(runs):
+            para.remove(r)
+        
+        # Create new run with preserved formatting
+        new_run = ET.SubElement(para, f'{NS_W}r')
+        if rPr_copy is not None:
+            new_run.append(rPr_copy)
+        
+        t = ET.SubElement(new_run, f'{NS_W}t')
+        if ' ' in new_text:
+            t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+        t.text = new_text
 
     # ------------------------------------------------------------------
     # Form-mode: template fill
@@ -2176,16 +2560,26 @@ class MarkdownToDocxConverter:
         with zipfile.ZipFile(self.template_path, 'r') as z:
             z.extractall(temp_dir)
 
-        # Detect document type: form vs essay
-        is_form = self._is_form_template(temp_dir)
+        # Detect document type: essay / form / complex
+        doc_type = self._detect_template_type(temp_dir)
+        mode_str = doc_type
 
-        if is_form:
+        if doc_type == 'complex':
+            # Complex mode: preserve structure, replace placeholders
+            result = self._preserve_structure_fill(markdown_content, temp_dir)
+            if not result:
+                # Fallback to essay mode if complex fill fails
+                doc_type = 'essay'
+                mode_str = 'complex-fallback-essay'
+
+        if doc_type == 'form':
             result = self._fill_template(markdown_content, temp_dir)
             if result is None:
                 # Fallback to essay mode if form fill fails
-                is_form = False
+                doc_type = 'essay'
+                mode_str = 'form-fallback-essay'
 
-        if not is_form:
+        if doc_type == 'essay':
             # Essay mode: generate new document.xml from Markdown
             self.tmpl_fmt = extract_template_formats(temp_dir)
 
@@ -2228,7 +2622,6 @@ class MarkdownToDocxConverter:
                     zf.write(fp, arcname)
 
         shutil.rmtree(temp_dir)
-        mode_str = "form-fill" if is_form else "essay"
         print(f"Converted ({mode_str} mode) to: {output_path}")
 
     def _update_content_types(self, temp_dir: str):

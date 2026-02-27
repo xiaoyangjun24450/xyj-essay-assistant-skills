@@ -317,9 +317,34 @@ class TemplateAnalyzer:
 
         'essay': body contains heading-style paragraphs → use Markdown conversion.
         'form':  body has no heading-style paragraphs → use template-fill approach.
+        'complex': body has complex structure (multiple sectPr, complex tables) → use structure-preserving approach.
         """
         outline = self.extract_outline()
-        return 'essay' if len(outline) >= 1 else 'form'
+        if len(outline) >= 1:
+            return 'essay'
+        
+        # Check for complex structures that need special handling
+        root = self.doc_root
+        if root is not None:
+            body = root.find('w:body', NS)
+            if body is not None:
+                # Count sectPr elements - multiple sectPr indicates complex document
+                sect_pr_count = len(body.findall('w:sectPr', NS))
+                # Also check for sectPr in paragraphs
+                for p in body.findall('w:p', NS):
+                    if p.find('w:pPr/w:sectPr', NS) is not None:
+                        sect_pr_count += 1
+                
+                # If multiple sections, it's a complex document
+                if sect_pr_count > 1:
+                    return 'complex'
+                
+                # Check for complex tables (nested tables, multiple tables)
+                tbl_count = len(body.findall('w:tbl', NS))
+                if tbl_count > 2:
+                    return 'complex'
+        
+        return 'form'
 
     # ------------------------------------------------------------------
     # Content structure extraction (for form-type documents)
