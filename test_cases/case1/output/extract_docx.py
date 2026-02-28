@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-提取docx文件内容，按格式差异换行
+提取docx文件内容，按格式差异换行，并添加位置标记
 
 用法:
     python extract_docx.py <docx文件路径> [输出文件路径]
 
 示例:
     python extract_docx.py input.docx output.md
-    python extract_docx.py input.docx  # 默认输出到stdout
+    python extract_docx.py input.docx  # 默认输出到同目录的.md文件
+
+注意: 此脚本会在markdown中保存详细的位置和格式信息，用于后续还原
 """
 import sys
 import os
 from docx import Document
-from docx.shared import Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 
 def get_run_format_info(run):
     """获取run的格式信息"""
     if run is None:
-        return None
+        return {}
 
     format_info = {
         'font_name': run.font.name if run.font.name else None,
@@ -30,27 +30,25 @@ def get_run_format_info(run):
         'underline': run.font.underline,
         'color': str(run.font.color.rgb) if run.font.color and run.font.color.rgb else None,
         'strike': run.font.strike,
-        'double_strike': run.font.double_strike,
         'superscript': run.font.superscript,
         'subscript': run.font.subscript,
-        'all_caps': run.font.all_caps,
-        'small_caps': run.font.small_caps,
     }
 
-    return format_info
+    return {k: v for k, v in format_info.items() if v is not None}
 
 
 def formats_equal(format1, format2):
     """比较两个格式是否相同"""
-    if format1 is None or format2 is None:
-        return format1 == format2
+    if not format1 and not format2:
+        return True
+    if not format1 or not format2:
+        return False
 
     # 比较所有格式属性，但忽略font_name为None的情况
     for key in format1.keys():
         val1 = format1.get(key)
         val2 = format2.get(key)
 
-        # 对于font_name，如果其中一个是None，则认为兼容
         if key == 'font_name':
             if val1 is not None and val2 is not None and val1 != val2:
                 return False
@@ -59,6 +57,15 @@ def formats_equal(format1, format2):
                 return False
 
     return True
+
+
+def format_to_string(format_info):
+    """将格式信息转换为字符串"""
+    parts = []
+    for key, value in format_info.items():
+        if value is not None and value != '':
+            parts.append(f'{key}={value}')
+    return '|'.join(parts)
 
 
 def extract_runs_with_format(runs):
@@ -80,62 +87,65 @@ def extract_runs_with_format(runs):
             current_text.append(run.text)
         else:
             if current_text:
-                result.append(''.join(current_text))
+                result.append({
+                    'text': ''.join(current_text),
+                    'format': current_format
+                })
             current_format = run_format
             current_text = [run.text]
 
     if current_text:
-        result.append(''.join(current_text))
+        result.append({
+            'text': ''.join(current_text),
+            'format': current_format
+        })
 
     return result
 
 
-def extract_table_cell_content(cell):
-    """提取表格单元格的内容，每个格式块占一行"""
-    parts = []
-    for para in cell.paragraphs:
-        run_parts = extract_runs_with_format(para.runs)
-        for part in run_parts:
-            if part:
-                parts.append(part)
-    return parts
-
-
 def extract_docx_content(docx_path, output_path):
-    """提取docx文件内容到txt文件，格式差异时换行"""
+    """提取docx文件内容到txt文件，格式差异时换行，并添加位置和格式标记"""
     doc = Document(docx_path)
 
     output_lines = []
 
     # 提取段落内容
-    for para in doc.paragraphs:
+    for para_idx, para in enumerate(doc.paragraphs):
         if not para.runs or all(run.text == '' for run in para.runs):
             output_lines.append('')
             continue
 
-        parts = extract_runs_with_format(para.runs)
-        for part in parts:
-            output_lines.append(part)
+        for run_idx, run in enumerate(para.runs):
+            if run.text == '':
+                continue
+            run_format = get_run_format_info(run)
+            format_str = format_to_string(run_format)
+            # 添加位置标记和格式标记
+            output_lines.append(f'<!-- PARA:{para_idx},RUN:{run_idx},FORMAT:{format_str} -->{run.text}')
         output_lines.append('')
 
     # 提取表格内容
-    for table in doc.tables:
+    for table_idx, table in enumerate(doc.tables):
         # 表格标识
         output_lines.append('')
-        output_lines.append('---')
+        output_lines.append('<!-- TABLE -->')
         output_lines.append('')
 
-        for row in table.rows:
-            # 每个单元格的内容
-            for cell in row.cells:
-                cell_parts = extract_table_cell_content(cell)
-                for part in cell_parts:
-                    output_lines.append(part)
+        for row_idx, row in enumerate(table.rows):
+            for cell_idx, cell in enumerate(row.cells):
+                for para_idx_in_cell, para in enumerate(cell.paragraphs):
+                    for run_idx, run in enumerate(para.runs):
+                        if run.text == '':
+                            continue
+                        run_format = get_run_format_info(run)
+                        format_str = format_to_string(run_format)
+                        # 添加位置标记和格式标记
+                        output_lines.append(f'<!-- TABLE:{table_idx},ROW:{row_idx},CELL:{cell_idx},PARA:{para_idx_in_cell},RUN:{run_idx},FORMAT:{format_str} -->{run.text}')
             # 行结束后换行
             output_lines.append('')
 
         output_lines.append('')
-        output_lines.append('---')
+        output_lines.append('<!-- TABLE_END -->')
         output_lines.append('')
 
     # 写入输出文件
@@ -145,6 +155,7 @@ def extract_docx_content(docx_path, output_path):
 
     print(f"内容已提取到: {output_path}")
     print(f"总行数: {len(output_lines)}")
+    print(f"包含 {len(doc.paragraphs)} 个段落和 {len(doc.tables)} 个表格")
 
 
 if __name__ == '__main__':
