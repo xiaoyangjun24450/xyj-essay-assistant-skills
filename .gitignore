@@ -1,4 +1,4 @@
 .vscode/
 .codebuddy/
-output/
+# output/
 skills/docx-essay-writer/scripts/__pycache__/
