@@ -172,9 +172,11 @@ def restore_docx_from_markdown(markdown_path, template_path, output_path):
             if para_idx < len(doc.paragraphs):
                 para = doc.paragraphs[para_idx]
                 if run_idx < len(para.runs):
-                    # 保留原始run，只修改文本
-                    para.runs[run_idx].text = content
-                    paragraph_changes += 1
+                    # 跳过域代码标记
+                    if not content.startswith('[FIELD:'):
+                        # 保留原始run，只修改文本
+                        para.runs[run_idx].text = content
+                        paragraph_changes += 1
         elif item['type'] == 'page_break_before':
             # 设置段前分页符
             para_idx = item['para_idx']
@@ -230,8 +232,9 @@ def restore_docx_from_markdown(markdown_path, template_path, output_path):
                             para = cell.paragraphs[para_idx]
                             if run_idx < len(para.runs):
                                 # 保留原始run，只修改文本
-                                para.runs[run_idx].text = content
-                                table_changes += 1
+                                if not content.startswith('[FIELD:'):
+                                    para.runs[run_idx].text = content
+                                    table_changes += 1
 
     # 保存文档
     doc.save(output_path)
