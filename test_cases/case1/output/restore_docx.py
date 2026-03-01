@@ -108,6 +108,30 @@ def restore_docx_from_markdown(markdown_path, template_path, output_path):
     paragraph_changes = 0
     table_changes = 0
 
+    # 首先清除所有段落和表格的内容（只保留格式和图片）
+    def has_non_text_elements(run):
+        """检查run是否包含非文本元素（如图片）"""
+        for child in run._element:
+            tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+            if tag not in ['t', 'rPr', 'tab', 'br']:  # t是文本元素，rPr是格式，tab是制表符，br是换行
+                return True
+        return False
+
+    for para in doc.paragraphs:
+        for run in para.runs:
+            # 只清空有文本内容的run，保留包含图片等元素的run
+            if not has_non_text_elements(run):
+                run.text = ""
+
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    for run in para.runs:
+                        # 只清空有文本内容的run，保留包含图片等元素的run
+                        if not has_non_text_elements(run):
+                            run.text = ""
+
     # 还原段落内容
     for item in parsed_items:
         if item['type'] == 'paragraph':
