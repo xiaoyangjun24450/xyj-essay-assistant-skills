@@ -17,6 +17,21 @@ import os
 from docx import Document
 
 
+def get_paragraph_format_info(para):
+    """获取段落的格式信息"""
+    format_info = {}
+
+    if para.paragraph_format:
+        if para.paragraph_format.page_break_before:
+            format_info['page_break_before'] = True
+        if para.paragraph_format.keep_together:
+            format_info['keep_together'] = True
+        if para.paragraph_format.keep_with_next:
+            format_info['keep_with_next'] = True
+
+    return format_info
+
+
 def get_run_format_info(run):
     """获取run的格式信息"""
     if run is None:
@@ -155,11 +170,43 @@ def extract_docx_content(docx_path, output_path):
 
     # 提取段落内容
     for para_idx, para in enumerate(doc.paragraphs):
+        # 获取段落格式信息
+        para_format = get_paragraph_format_info(para)
+
+        # 如果段落有page_break_before，添加标记
+        if para_format.get('page_break_before'):
+            output_lines.append(f'<!-- PARA:{para_idx},PAGE_BREAK_BEFORE -->')
+
         if not para.runs or all(run.text == '' for run in para.runs):
-            output_lines.append('')
+            # 检查是否有分页符（br type='page'）
+            has_page_break = False
+            for run in para.runs:
+                for child in run._element:
+                    from docx.oxml.ns import qn
+                    tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                    if tag == 'br':
+                        br_type = child.get(qn('w:type'))
+                        if br_type == 'page':
+                            has_page_break = True
+                            break
+
+            if has_page_break:
+                output_lines.append(f'<!-- PARA:{para_idx},PAGE_BREAK -->')
+            else:
+                output_lines.append('')
             continue
 
         for run_idx, run in enumerate(para.runs):
+            # 检查是否有分页符
+            from docx.oxml.ns import qn
+            for child in run._element:
+                tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                if tag == 'br':
+                    br_type = child.get(qn('w:type'))
+                    if br_type == 'page':
+                        output_lines.append(f'<!-- PARA:{para_idx},RUN:{run_idx},PAGE_BREAK -->')
+                        continue
+
             # 提取文本或域代码内容
             text_content = run.text
             field_code = get_field_code_text(run)

@@ -80,6 +80,23 @@ def parse_markdown_line(line):
     if line.strip() == '<!-- TABLE_END -->':
         return {'type': 'table_end'}
 
+    # 匹配段前分页符
+    para_break_before_match = re.match(r'<!-- PARA:(\d+),PAGE_BREAK_BEFORE -->', line)
+    if para_break_before_match:
+        return {
+            'type': 'page_break_before',
+            'para_idx': int(para_break_before_match.group(1))
+        }
+
+    # 匹配分页符（在run中）
+    para_break_match = re.match(r'<!-- PARA:(\d+),RUN:(\d+),PAGE_BREAK -->', line)
+    if para_break_match:
+        return {
+            'type': 'page_break',
+            'para_idx': int(para_break_match.group(1)),
+            'run_idx': int(para_break_match.group(2))
+        }
+
     # 普通空行
     if line.strip() == '':
         return {'type': 'empty'}
@@ -107,8 +124,10 @@ def restore_docx_from_markdown(markdown_path, template_path, output_path):
     # 统计
     paragraph_changes = 0
     table_changes = 0
+    page_break_before_count = 0
+    page_break_count = 0
 
-    # 首先清除所有段落和表格的内容（只保留格式和图片）
+    # 首先清除所有段落和表格的内容（只保留格式、图片和分页符）
     def has_non_text_elements(run):
         """检查run是否包含非文本元素（如图片）"""
         for child in run._element:
@@ -117,10 +136,21 @@ def restore_docx_from_markdown(markdown_path, template_path, output_path):
                 return True
         return False
 
+    def has_page_break(run):
+        """检查run是否包含分页符"""
+        from docx.oxml.ns import qn
+        for child in run._element:
+            tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+            if tag == 'br':
+                br_type = child.get(qn('w:type'))
+                if br_type == 'page':
+                    return True
+        return False
+
     for para in doc.paragraphs:
         for run in para.runs:
-            # 只清空有文本内容的run，保留包含图片等元素的run
-            if not has_non_text_elements(run):
+            # 只清空有文本内容的run，保留包含图片或分页符等元素的run
+            if not has_non_text_elements(run) and not has_page_break(run):
                 run.text = ""
 
     for table in doc.tables:
@@ -128,8 +158,8 @@ def restore_docx_from_markdown(markdown_path, template_path, output_path):
             for cell in row.cells:
                 for para in cell.paragraphs:
                     for run in para.runs:
-                        # 只清空有文本内容的run，保留包含图片等元素的run
-                        if not has_non_text_elements(run):
+                        # 只清空有文本内容的run，保留包含图片或分页符等元素的run
+                        if not has_non_text_elements(run) and not has_page_break(run):
                             run.text = ""
 
     # 还原段落内容
@@ -145,6 +175,40 @@ def restore_docx_from_markdown(markdown_path, template_path, output_path):
                     # 保留原始run，只修改文本
                     para.runs[run_idx].text = content
                     paragraph_changes += 1
+        elif item['type'] == 'page_break_before':
+            # 设置段前分页符
+            para_idx = item['para_idx']
+            if para_idx < len(doc.paragraphs):
+                para = doc.paragraphs[para_idx]
+                para.paragraph_format.page_break_before = True
+                page_break_before_count += 1
+        elif item['type'] == 'page_break':
+            # 添加分页符到指定run中
+            para_idx = item['para_idx']
+            run_idx = item['run_idx']
+            if para_idx < len(doc.paragraphs):
+                para = doc.paragraphs[para_idx]
+                if run_idx < len(para.runs):
+                    # 检查该run是否已经有分页符
+                    from docx.oxml import OxmlElement
+                    from docx.oxml.ns import qn
+                    run = para.runs[run_idx]
+                    has_page_break = False
+                    for child in run._element:
+                        tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                        if tag == 'br':
+                            br_type = child.get(qn('w:type'))
+                            if br_type == 'page':
+                                has_page_break = True
+                                break
+
+                    # 如果没有分页符，添加一个
+                    if not has_page_break:
+                        # 创建分页符元素
+                        br = OxmlElement('w:br')
+                        br.set(qn('w:type'), 'page')
+                        run._element.append(br)
+                        page_break_count += 1
 
     # 还原表格内容
     for item in parsed_items:
@@ -174,6 +238,8 @@ def restore_docx_from_markdown(markdown_path, template_path, output_path):
     print(f"文档已还原到: {output_path}")
     print(f"共修改了 {paragraph_changes} 个段落中的run")
     print(f"共修改了 {table_changes} 个表格单元格中的run")
+    print(f"共设置了 {page_break_before_count} 个段前分页符")
+    print(f"共添加了 {page_break_count} 个分页符")
     print("所有格式、图片和样式都已保留")
 
 
