@@ -68,6 +68,16 @@ def format_to_string(format_info):
     return '|'.join(parts)
 
 
+def get_field_code_text(run):
+    """获取run中的域代码文本（instrText）"""
+    field_text = []
+    for child in run._element:
+        tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+        if tag == 'instrText' and child.text:
+            field_text.append(child.text)
+    return ''.join(field_text) if field_text else None
+
+
 def extract_runs_with_format(runs):
     """提取runs中的文本，按格式差异分割"""
     result = []
@@ -103,6 +113,40 @@ def extract_runs_with_format(runs):
     return result
 
 
+def extract_table_content(table, table_idx, output_lines, path_prefix=""):
+    """递归提取表格内容（包括嵌套表格）"""
+    for row_idx, row in enumerate(table.rows):
+        for cell_idx, cell in enumerate(row.cells):
+            # 提取单元格段落
+            for para_idx_in_cell, para in enumerate(cell.paragraphs):
+                for run_idx, run in enumerate(para.runs):
+                    # 提取文本或域代码内容
+                    text_content = run.text
+                    field_code = get_field_code_text(run)
+
+                    # 如果run.text为空但有域代码，则提取域代码
+                    if not text_content and field_code:
+                        text_content = f'[FIELD:{field_code}]'
+
+                    if not text_content:
+                        continue
+
+                    run_format = get_run_format_info(run)
+                    format_str = format_to_string(run_format)
+                    # 添加位置标记和格式标记
+                    path = f"{path_prefix},ROW:{row_idx},CELL:{cell_idx},PARA:{para_idx_in_cell},RUN:{run_idx}"
+                    output_lines.append(f'<!-- TABLE:{table_idx}{path},FORMAT:{format_str} -->{text_content}')
+
+            # 递归处理嵌套表格
+            if len(cell.tables) > 0:
+                for nested_idx, nested_table in enumerate(cell.tables):
+                    nested_path = f"{path_prefix},ROW:{row_idx},CELL:{cell_idx},NESTED:{nested_idx}"
+                    extract_table_content(nested_table, table_idx, output_lines, nested_path)
+
+        # 行结束后换行
+        output_lines.append('')
+
+
 def extract_docx_content(docx_path, output_path):
     """提取docx文件内容到txt文件，格式差异时换行，并添加位置和格式标记"""
     doc = Document(docx_path)
@@ -116,33 +160,32 @@ def extract_docx_content(docx_path, output_path):
             continue
 
         for run_idx, run in enumerate(para.runs):
-            if run.text == '':
+            # 提取文本或域代码内容
+            text_content = run.text
+            field_code = get_field_code_text(run)
+
+            # 如果run.text为空但有域代码，则提取域代码
+            if not text_content and field_code:
+                text_content = f'[FIELD:{field_code}]'
+
+            if not text_content:
                 continue
+
             run_format = get_run_format_info(run)
             format_str = format_to_string(run_format)
             # 添加位置标记和格式标记
-            output_lines.append(f'<!-- PARA:{para_idx},RUN:{run_idx},FORMAT:{format_str} -->{run.text}')
+            output_lines.append(f'<!-- PARA:{para_idx},RUN:{run_idx},FORMAT:{format_str} -->{text_content}')
         output_lines.append('')
 
-    # 提取表格内容
+    # 提取表格内容（包括嵌套表格）
     for table_idx, table in enumerate(doc.tables):
         # 表格标识
         output_lines.append('')
         output_lines.append('<!-- TABLE -->')
         output_lines.append('')
 
-        for row_idx, row in enumerate(table.rows):
-            for cell_idx, cell in enumerate(row.cells):
-                for para_idx_in_cell, para in enumerate(cell.paragraphs):
-                    for run_idx, run in enumerate(para.runs):
-                        if run.text == '':
-                            continue
-                        run_format = get_run_format_info(run)
-                        format_str = format_to_string(run_format)
-                        # 添加位置标记和格式标记
-                        output_lines.append(f'<!-- TABLE:{table_idx},ROW:{row_idx},CELL:{cell_idx},PARA:{para_idx_in_cell},RUN:{run_idx},FORMAT:{format_str} -->{run.text}')
-            # 行结束后换行
-            output_lines.append('')
+        # 递归提取表格内容
+        extract_table_content(table, table_idx, output_lines, "")
 
         output_lines.append('')
         output_lines.append('<!-- TABLE_END -->')

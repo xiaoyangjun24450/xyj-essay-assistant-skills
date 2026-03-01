@@ -118,6 +118,7 @@
 <!-- TABLE:0,ROW:0,CELL:0,PARA:1,RUN:0,FORMAT:font_name=Times New Roman|font_size=12.0|bold=True -->课题的背景和意义：
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:0,FORMAT:font_name=Times New Roman|font_size=12.0 -->本课题源于电机控制技术在工业4.0和智能制造中的核心地位日益凸显。随着现代工业对电机控制系统性能要求不断提升，传统控制方法在动态响应、控制精度和能效优化等方面存在局限，而无刷直流电机凭借其高效率、低噪声和长寿命等优势，已成为现代运动控制系统的重要选择
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:1,FORMAT:font_size=12.0 -->支撑
+<!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:5,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[FIELD: REF _Ref1824 \n \h ]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:7,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[1]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:9,FORMAT:font_name=Times New Roman|font_size=12.0 -->。
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:10,FORMAT:font_name=Times New Roman|font_size=12.0 -->近年来
@@ -125,19 +126,23 @@
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:12,FORMAT:font_name=Times New Roman|font_size=12.0 -->随着半导体技术的快速发展
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:13,FORMAT:font_name=Times New Roman|font_size=12.0 -->，高性能嵌入式芯片
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:14,FORMAT:font_name=Times New Roman|font_size=12.0 -->为复杂电机控制算法的实现提供了硬件基础
+<!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:16,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[FIELD: REF _Ref19709 \r \h ]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:18,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[2]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:20,FORMAT:font_name=Times New Roman|font_size=12.0 -->，智能电机控制技术已成为推动工业自动化发展的关键技术。ESP32
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:21,FORMAT:font_name=Times New Roman|font_size=12.0 -->芯片作为一款低成本、高性能的嵌入式控制器，具备双核处理器、丰富的外设接口和强大的计算能力，为FOC算法的实现提供了理想的平台
+<!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:23,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[FIELD: REF _Ref19761 \r \h ]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:25,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[3]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:27,FORMAT:font_name=Times New Roman|font_size=12.0 -->。同时，基于ESP32的FOC控制器还能在物联网应用场景中实现远程监控和智能控制
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:28,FORMAT:font_name=Times New Roman|font_size=12.0 -->功能
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:29,FORMAT:font_name=Times New Roman|font_size=12.0 -->，为电机控制系统的智能化升级提供技术支持
+<!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:31,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[FIELD: REF _Ref19817 \r \h ]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:33,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[4]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:35,FORMAT:font_name=Times New Roman|font_size=12.0 -->。
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:36,FORMAT:font_name=Times New Roman|font_size=12.0 -->因
 <!-- TABLE:0,ROW:0,CELL:0,PARA:2,RUN:37,FORMAT:font_name=Times New Roman|font_size=12.0 -->此，基于ESP32的FOC控制器研究不仅顺应智能制造的发展趋势，也契合电机控制技术高效化、智能化的现实需求。
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:0,FORMAT:font_name=Times New Roman|font_size=12.0 -->磁场定向控制（Field Oriented Control, FOC）技术作为高性能电机控制的核心算法，在当前电机控制研究领域备受关注。
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:1,FORMAT:font_name=Times New Roman|font_size=12.0 -->然而，传统FOC算法对控制器的计算能力和实时性要求较高
+<!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:3,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[FIELD: REF _Ref2062 \n \h ]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:5,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[5]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:7,FORMAT:font_name=Times New Roman|font_size=12.0 -->，难以在低成本嵌入式平台上实现高效控制。作为一种
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:8,FORMAT:font_name=Times New Roman|font_size=12.0 -->兼具高控制精度和良好动态响应
@@ -148,6 +153,7 @@
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:13,FORMAT:font_name=Times New Roman|font_size=12.0 -->FOC）
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:14,FORMAT:font_name=Times New Roman|font_size=12.0 -->能够实现
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:15,FORMAT:font_name=Times New Roman|font_size=12.0 -->电机转矩和磁链的解耦控制
+<!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:17,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[FIELD: REF _Ref2111 \n \h ]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:19,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[6]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:21,FORMAT:font_name=Times New Roman|font_size=12.0 -->。
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:22,FORMAT:font_name=Times New Roman|font_size=12.0 -->现有研究表明，
@@ -156,16 +162,21 @@
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:25,FORMAT:font_name=Times New Roman|font_size=12.0 -->电机控制
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:26,FORMAT:font_name=Times New Roman|font_size=12.0 -->领域
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:27,FORMAT:font_name=Times New Roman|font_size=12.0 -->展现出良好的控制性能
+<!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:29,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[FIELD: REF _Ref2157 \n \h ]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:31,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[7]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:33,FORMAT:font_name=Times New Roman|font_size=12.0 -->。
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:34,FORMAT:font_name=Times New Roman|font_size=12.0 -->此外，FOC算法在保证控制精度的同时，需要实时处理大量坐标变换和电流环控制任务，对嵌入式处理器的性能要求较高，现有低成本方案在控制精度与实时性之间难以兼顾，无法同时满足电机控制系统对高性能和低成本的双重需求
+<!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:36,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[FIELD: REF _Ref21613 \r \h ]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:38,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[8]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:40,FORMAT:font_name=Times New Roman|font_size=12.0 -->。因此，
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:41,FORMAT:font_name=Times New Roman|font_size=12.0 -->基于
 <!-- TABLE:0,ROW:0,CELL:0,PARA:3,RUN:42,FORMAT:font_name=Times New Roman|font_size=12.0 -->ESP32的FOC控制器研究将为低成本高性能电机控制系统开发提供有力支持，进一步推动工业4.0和智能制造发展。
 <!-- TABLE:0,ROW:0,CELL:0,PARA:4,RUN:0,FORMAT:font_name=Times New Roman|font_size=12.0 -->随着无刷直流电机成为现代工业驱动系统的主流选择，高性能电机控制技术已成为学术界与产业界的研究热点
+<!-- TABLE:0,ROW:0,CELL:0,PARA:4,RUN:2,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[FIELD: REF _Ref2245 \n \h ]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:4,RUN:4,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[9]
+<!-- TABLE:0,ROW:0,CELL:0,PARA:4,RUN:7,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[FIELD: REF _Ref2251 \n \h ]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:4,RUN:9,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[10]
+<!-- TABLE:0,ROW:0,CELL:0,PARA:4,RUN:12,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[FIELD: REF _Ref20124 \r \h ]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:4,RUN:14,FORMAT:font_name=Times New Roman|font_size=12.0|superscript=True|subscript=False -->[11]
 <!-- TABLE:0,ROW:0,CELL:0,PARA:4,RUN:16,FORMAT:font_size=12.0|superscript=False|subscript=False -->。
 <!-- TABLE:0,ROW:0,CELL:0,PARA:4,RUN:17,FORMAT:font_name=Times New Roman|font_size=12.0 -->本课题旨在研究基于ESP32的FOC控制关键技术，以提升电机控制系统的控制精度和动态性能。通过利用FOC算法的解耦控制优势和ESP32的高性能计算能力，解决传统电机控制方法在动态响应和控制精度方面的问题，进而提高电机系统的运行效率和稳定性。具体而言，本研究将利用ESP32的双核处理能力和丰富的外设接口，提出一种低成本高性能的FOC控制方案，并通过仿真分析与实际测试评估所提方案在不同负载条件下的性能表现，验证其在提升控制精度和降低转矩脉动方面的有效性。研究成果将为电机控制系统的实际应用和优化提供理论支持，并对智能制造装备开发具有重要的工程应用价值。
@@ -210,7 +221,7 @@
 <!-- TABLE:0,ROW:0,CELL:0,PARA:22,RUN:1,FORMAT:font_size=12.0|bold=False -->。
 <!-- TABLE:0,ROW:0,CELL:0,PARA:22,RUN:2,FORMAT:font_name=Times New Roman|font_size=12.0|bold=False -->建立系统化的实验记录文档，详细记录实验环境、参数设定、测试结果及问题分析，确保研究数据的完整性和可追溯性。同时，使用适当的数据管理工具（如Excel、MATLAB等）对实验数据进行分类存储和分析，以提高数据管理效率。
 <!-- TABLE:0,ROW:0,CELL:0,PARA:23,RUN:0,FORMAT:font_name=Times New Roman|font_size=12.0|bold=False -->关注行业动态，拓展研究视野
-<!-- TABLE:0,ROW:0,CELL:0,PARA:23,RUN:1,FORMAT:font_name=Times New Roman|font_size=12.0|bold=False -->。
+<!-- TABLE:0,ROW:0,CELL:0,PARA:23,RUN:1,FORMAT:font_size=12.0|bold=False -->。
 <!-- TABLE:0,ROW:0,CELL:0,PARA:23,RUN:2,FORMAT:font_name=Times New Roman|font_size=12.0|bold=False -->密切
 <!-- TABLE:0,ROW:0,CELL:0,PARA:23,RUN:3,FORMAT:font_size=12.0|bold=False -->关注
 <!-- TABLE:0,ROW:0,CELL:0,PARA:23,RUN:4,FORMAT:font_name=Times New Roman|font_size=12.0|bold=False -->电机控制、
@@ -228,6 +239,7 @@
 <!-- TABLE:1,ROW:0,CELL:0,PARA:2,RUN:0,FORMAT:font_name=Times New Roman|font_size=12.0|bold=True -->面向无刷直流电机控制，研究FOC控制算法的基本理论和实现方法
 <!-- TABLE:1,ROW:0,CELL:0,PARA:3,RUN:0,FORMAT:font_name=Times New Roman|font_size=12.0 -->首先，无刷直流电机作为现代运动控制系统的核心执行部件，凭借其高效率、低噪声和长寿命等特性，已成为工业驱动和机器人应用的首选。由于电机控制需要兼顾动态响应和控制精度，传统的标量控制方法难以满足高性能控制的需求。因此，本研究将通过利用FOC算法的解耦控制优势，为电机控制系统性能的提升提供新的思路和方法。
 <!-- TABLE:1,ROW:0,CELL:0,PARA:4,RUN:0,FORMAT:font_name=Times New Roman|font_size=12.0 -->其次，本研究将针对现有的控制技术（如PID控制、滑模控制和预测控制等）以及主流电机控制方法（如六步换相、SVPWM控制和矢量控制等）展开深入分析，梳理各技术的基本理论，全面探讨其技术特点与适用场景，并结合各技术的优势与局限性，筛选并设计适用于本课题研究的最优FOC控制方案，从而为制定课题技术路线提供坚实的理论依据。
+<!-- TABLE:1,ROW:0,CELL:0,PARA:4,RUN:4,FORMAT:font_name=Times New Roman|font_size=12.0 -->[FIELD: REF _Ref3440 \h ]
 <!-- TABLE:1,ROW:0,CELL:0,PARA:4,RUN:6,FORMAT:font_name=Times New Roman|font_size=12.0 -->图1
 <!-- TABLE:1,ROW:0,CELL:0,PARA:4,RUN:8,FORMAT:font_name=Times New Roman|font_size=12.0 -->中展示了FOC控制系统的基本原理框图。
 <!-- TABLE:1,ROW:0,CELL:0,PARA:5,RUN:0,FORMAT:font_name=Times New Roman|font_size=12.0|bold=True -->研究
@@ -291,7 +303,6 @@
 <!-- TABLE:1,ROW:0,CELL:0,PARA:16,RUN:8,FORMAT:font_name=Times New Roman|font_size=12.0 -->方案
 <!-- TABLE:1,ROW:0,CELL:0,PARA:16,RUN:9,FORMAT:font_size=12.0 -->。
 <!-- TABLE:1,ROW:0,CELL:0,PARA:16,RUN:10,FORMAT:font_name=Times New Roman|font_size=12.0 -->分析电机的参数特性和运行特性，构建符合实际应用需求的电机参数模型，并通过仿真进行验证。在此基础上，设计适用于基于ESP32平台的FOC
-<!-- TABLE:1,ROW:0,CELL:0,PARA:16,RUN:11,FORMAT:font_size=12.0 -->
 <!-- TABLE:1,ROW:0,CELL:0,PARA:16,RUN:12,FORMAT:font_name=Times New Roman|font_size=12.0 -->PID控制方案，深入研究其控制性能特性，并评估方案的稳定性与有效性。
 <!-- TABLE:1,ROW:0,CELL:0,PARA:17,RUN:0,FORMAT:font_name=Times New Roman|font_size=12.0 -->2
 <!-- TABLE:1,ROW:0,CELL:0,PARA:17,RUN:1,FORMAT:font_name=Times New Roman|font_size=12.0 -->0
@@ -325,6 +336,12 @@
 <!-- TABLE:1,ROW:0,CELL:0,PARA:18,RUN:20,FORMAT:font_name=Times New Roman|font_size=12.0 -->，最终定稿并提交论文，
 <!-- TABLE:1,ROW:0,CELL:0,PARA:18,RUN:21,FORMAT:font_size=12.0 -->同时
 <!-- TABLE:1,ROW:0,CELL:0,PARA:18,RUN:22,FORMAT:font_name=Times New Roman|font_size=12.0 -->归档毕业设计相关材料。
+<!-- TABLE:1,ROW:0,CELL:0,NESTED:0,ROW:0,CELL:0,PARA:0,RUN:1,FORMAT:font_size=10.5|bold=True -->图
+<!-- TABLE:1,ROW:0,CELL:0,NESTED:0,ROW:0,CELL:0,PARA:0,RUN:3,FORMAT:font_size=10.5|bold=True -->[FIELD: SEQ 图1- \* ARABIC ]
+<!-- TABLE:1,ROW:0,CELL:0,NESTED:0,ROW:0,CELL:0,PARA:0,RUN:5,FORMAT:font_size=10.5|bold=True -->1
+<!-- TABLE:1,ROW:0,CELL:0,NESTED:0,ROW:0,CELL:0,PARA:0,RUN:7,FORMAT:font_size=10.5 --> 
+<!-- TABLE:1,ROW:0,CELL:0,NESTED:0,ROW:0,CELL:0,PARA:0,RUN:8,FORMAT:font_size=10.5 -->ESP32的FOC控制方案方框图
+
 
 
 <!-- TABLE_END -->
@@ -354,18 +371,12 @@
 <!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:3,FORMAT:font_size=10.5 -->细节，进一步提出修改意见。
 <!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:4,FORMAT:font_name=Times New Roman|font_size=10.5 -->（2）指导学生
 <!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:5,FORMAT:font_size=10.5 -->阅读
-<!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:6,FORMAT:font_name=Times New Roman|font_size=10.5 -->
-<!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:7,FORMAT:font_size=10.5 -->
-<!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:8,FORMAT:font_name=Times New Roman|font_size=10.5 -->
-<!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:9,FORMAT:font_name=Times New Roman|font_size=10.5 -->
-<!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:10,FORMAT:font_size=10.5 -->
 <!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:11,FORMAT:font_name=Times New Roman|font_size=10.5 -->磁场定向控制
 <!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:12,FORMAT:font_size=10.5 -->（Field Oriented Control, FOC）
 <!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:13,FORMAT:font_name=Times New Roman|font_size=10.5 -->算法文献，
 <!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:14,FORMAT:font_size=10.5 -->并
 <!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:15,FORMAT:font_name=Times New Roman|font_size=10.5 -->基于文献内容，引导学生复现
 <!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:16,FORMAT:font_size=10.5 -->G
-<!-- TABLE:2,ROW:2,CELL:1,PARA:0,RUN:17,FORMAT:font_name=Times New Roman|font_size=10.5 -->
 
 <!-- TABLE:2,ROW:3,CELL:0,PARA:0,RUN:0,FORMAT:font_size=10.5 -->2025.3.10—2025.3.16
 <!-- TABLE:2,ROW:3,CELL:1,PARA:0,RUN:0,FORMAT:font_name=Times New Roman|font_size=10.5 -->蔡相明老师（1）讲解PID控制器的基本理论知识，包括比例、积分、微分三个控制参数的作用及其整定方法。（2）指导学生阅读PID控制器相关经典教材与论文，掌握参数整定、稳定性分析等核心概念，
@@ -434,17 +445,7 @@
 <!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:0,FORMAT:color=222222 -->王
 <!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:1,FORMAT:font_name=Times New Roman|color=222222 -->志良. 电机运动控制技术
 <!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:2,FORMAT:font_name=Times New Roman|color=222222 -->[M]. 北京: 机械工业出版社, 2020.
-<!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:3,FORMAT:font_name=Times New Roman|color=222222 -->
-<!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:4,FORMAT:font_name=Times New Roman|color=222222 -->
-<!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:5,FORMAT:font_name=Times New Roman|color=222222 -->
-<!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:6,FORMAT:font_name=Times New Roman|color=222222 -->
-<!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:7,FORMAT:font_name=Times New Roman|color=222222 -->
-<!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:8,FORMAT:font_name=Times New Roman|color=222222 -->
-<!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:9,FORMAT:font_name=Times New Roman|color=222222 -->
-<!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:10,FORMAT:font_name=Times New Roman|color=222222 -->
-<!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:11,FORMAT:color=222222 -->
-<!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:15,FORMAT:font_name=Times New Roman|font_size=10.5 -->
-<!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:17,FORMAT:font_name=Times New Roman|font_size=10.5|color=222222 -->
+<!-- TABLE:3,ROW:0,CELL:0,PARA:1,RUN:13,FORMAT:font_name=Times New Roman|font_size=10.5|color=222222 -->[FIELD: HYPERLINK "http://221.179.172.81/images/20240204/21161707047023502.pdf" ]
 <!-- TABLE:3,ROW:0,CELL:0,PARA:2,RUN:0,FORMAT:font_name=Times New Roman|color=222222 -->陈伯时. 电力拖动自动控制系统[M]. 北京: 机械工业出版社, 2018.
 <!-- TABLE:3,ROW:0,CELL:0,PARA:3,RUN:0,FORMAT:color=222222 -->周渊深. 交流电机调速控制系统[M]. 北京: 机械工业出版社, 2019.
 <!-- TABLE:3,ROW:0,CELL:0,PARA:4,RUN:0,FORMAT:font_name=Times New Roman|color=222222 -->Blaschke F. The principle of field orientation as applied to the new transvector closed-loop control system for rotating-field machines[J]. Siemens Review, 1972, 39(5): 217-220.
