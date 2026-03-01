@@ -59,39 +59,19 @@ def parse_markdown_line(line):
             'content': para_match.group(4)
         }
 
-    # 匹配表格标记（支持嵌套表格）
-    # 普通表格: TABLE:1,ROW:0,CELL:0,PARA:0,RUN:0
-    # 嵌套表格: TABLE:1,ROW:0,CELL:0,NESTED:0,ROW:0,CELL:0,PARA:0,RUN:0
-    table_match = re.match(r'<!-- TABLE:(\d+)(,ROW:(\d+),CELL:(\d+)(?:,NESTED:(\d+),ROW:(\d+),CELL:(\d+))?,PARA:(\d+),RUN:(\d+)),FORMAT:(.*?) -->(.*)', line)
+    # 匹配表格标记
+    table_match = re.match(r'<!-- TABLE:(\d+),ROW:(\d+),CELL:(\d+),PARA:(\d+),RUN:(\d+),FORMAT:(.*?) -->(.*)', line)
     if table_match:
-        table_idx = int(table_match.group(1))
-
-        # 检查是否是嵌套表格
-        if table_match.group(5):  # 有 NESTED 标记
-            return {
-                'type': 'nested_table_cell',
-                'table_idx': table_idx,
-                'outer_row_idx': int(table_match.group(3)),
-                'outer_cell_idx': int(table_match.group(4)),
-                'nested_idx': int(table_match.group(5)),
-                'nested_row_idx': int(table_match.group(6)),
-                'nested_cell_idx': int(table_match.group(7)),
-                'para_idx': int(table_match.group(8)),
-                'run_idx': int(table_match.group(9)),
-                'format': string_to_format(table_match.group(10)),
-                'content': table_match.group(11)
-            }
-        else:
-            return {
-                'type': 'table_cell',
-                'table_idx': table_idx,
-                'row_idx': int(table_match.group(3)),
-                'cell_idx': int(table_match.group(4)),
-                'para_idx': int(table_match.group(8)),
-                'run_idx': int(table_match.group(9)),
-                'format': string_to_format(table_match.group(10)),
-                'content': table_match.group(11)
-            }
+        return {
+            'type': 'table_cell',
+            'table_idx': int(table_match.group(1)),
+            'row_idx': int(table_match.group(2)),
+            'cell_idx': int(table_match.group(3)),
+            'para_idx': int(table_match.group(4)),
+            'run_idx': int(table_match.group(5)),
+            'format': string_to_format(table_match.group(6)),
+            'content': table_match.group(7)
+        }
 
     # 匹配表格标记
     if line.strip() == '<!-- TABLE -->':
@@ -105,50 +85,6 @@ def parse_markdown_line(line):
         return {'type': 'empty'}
 
     return None
-
-
-def has_field_code(run):
-    """检查run是否包含域代码（instrText）"""
-    for child in run._element:
-        tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
-        if tag == 'instrText':
-            return True
-    return False
-
-
-def get_run_format(run):
-    """获取run的格式信息"""
-    format_info = {
-        'font_name': run.font.name if run.font.name else None,
-        'font_size': run.font.size.pt if run.font.size else None,
-        'bold': run.font.bold,
-        'italic': run.font.italic,
-        'underline': run.font.underline,
-        'strike': run.font.strike,
-        'superscript': run.font.superscript,
-        'subscript': run.font.subscript,
-    }
-    return {k: v for k, v in format_info.items() if v is not None}
-
-
-def apply_run_format(run, format_info):
-    """应用格式到run"""
-    if 'font_name' in format_info and format_info['font_name']:
-        run.font.name = format_info['font_name']
-    if 'font_size' in format_info:
-        run.font.size = Pt(format_info['font_size'])
-    if format_info.get('bold'):
-        run.font.bold = True
-    if format_info.get('italic'):
-        run.font.italic = True
-    if format_info.get('underline'):
-        run.font.underline = True
-    if format_info.get('strike'):
-        run.font.strike = True
-    if format_info.get('superscript'):
-        run.font.superscript = True
-    if format_info.get('subscript'):
-        run.font.subscript = True
 
 
 def restore_docx_from_markdown(markdown_path, template_path, output_path):
@@ -172,81 +108,45 @@ def restore_docx_from_markdown(markdown_path, template_path, output_path):
     paragraph_changes = 0
     table_changes = 0
 
-    # 按段落索引分组
-    para_items = {}
+    # 首先清除所有段落和表格的内容（只保留格式和图片）
+    def has_non_text_elements(run):
+        """检查run是否包含非文本元素（如图片）"""
+        for child in run._element:
+            tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+            if tag not in ['t', 'rPr', 'tab', 'br']:  # t是文本元素，rPr是格式，tab是制表符，br是换行
+                return True
+        return False
+
+    for para in doc.paragraphs:
+        for run in para.runs:
+            # 只清空有文本内容的run，保留包含图片等元素的run
+            if not has_non_text_elements(run):
+                run.text = ""
+
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    for run in para.runs:
+                        # 只清空有文本内容的run，保留包含图片等元素的run
+                        if not has_non_text_elements(run):
+                            run.text = ""
+
+    # 还原段落内容
     for item in parsed_items:
         if item['type'] == 'paragraph':
             para_idx = item['para_idx']
-            if para_idx not in para_items:
-                para_items[para_idx] = []
-            para_items[para_idx].append(item)
-
-    # 还原段落内容
-    for para_idx, items in sorted(para_items.items()):
-        if para_idx >= len(doc.paragraphs):
-            continue
-
-        para = doc.paragraphs[para_idx]
-
-        # 保存原始段落中的所有run信息（包括域代码和图片）
-        original_runs = []
-        for run in para.runs:
-            original_runs.append({
-                'run': run,
-                'has_field_code': has_field_code(run),
-                'format': get_run_format(run),
-                'text': run.text
-            })
-
-        # 先清空段落
-        para.clear()
-
-        # 按run_idx排序并重建
-        items_sorted = sorted(items, key=lambda x: x['run_idx'])
-
-        # 处理每个run
-        for item in items_sorted:
             run_idx = item['run_idx']
             content = item['content']
-            target_format = item.get('format', {})
 
-            # 检查原始是否有对应位置的run
-            if run_idx < len(original_runs):
-                orig_run = original_runs[run_idx]
-                if orig_run['has_field_code']:
-                    # 如果原始run包含域代码，创建一个零宽空格run来保持位置
-                    new_run = para.add_run('\u200B')  # Zero Width Space
-                    apply_run_format(new_run, orig_run['format'])
-                else:
-                    # 使用原始run的格式，应用新内容
-                    # 如果内容是 [FIELD:...]，说明这是域代码标记
-                    if re.match(r'^\[FIELD:', content):
-                        new_run = para.add_run('\u200B')  # Zero Width Space
-                    else:
-                        # 移除其他可能的 [FIELD:...] 标记
-                        content = re.sub(r'\[FIELD:[^\]]*\]', '', content)
-                        # 如果content为空，使用零宽空格
-                        text_to_add = content if content else '\u200B'
-                        new_run = para.add_run(text_to_add)
-                        if target_format:
-                            apply_run_format(new_run, target_format)
-                        elif orig_run['format']:
-                            apply_run_format(new_run, orig_run['format'])
+            if para_idx < len(doc.paragraphs):
+                para = doc.paragraphs[para_idx]
+                if run_idx < len(para.runs):
+                    # 保留原始run，只修改文本
+                    para.runs[run_idx].text = content
                     paragraph_changes += 1
-            else:
-                # 创建新的run
-                # 如果内容是 [FIELD:...]，说明这是域代码标记
-                if re.match(r'^\[FIELD:', content):
-                    new_run = para.add_run('\u200B')  # Zero Width Space
-                else:
-                    # 移除其他可能的 [FIELD:...] 标记
-                    content = re.sub(r'\[FIELD:[^\]]*\]', '', content)
-                    text_to_add = content if content else '\u200B'
-                    new_run = para.add_run(text_to_add)
-                    apply_run_format(new_run, target_format)
-                paragraph_changes += 1
 
-    # 还原表格内容（包括嵌套表格）
+    # 还原表格内容
     for item in parsed_items:
         if item['type'] == 'table_cell':
             table_idx = item['table_idx']
@@ -255,14 +155,6 @@ def restore_docx_from_markdown(markdown_path, template_path, output_path):
             para_idx = item['para_idx']
             run_idx = item['run_idx']
             content = item['content']
-            target_format = item.get('format', {})
-
-            # 如果内容是 [FIELD:...]，说明这是域代码，跳过
-            if re.match(r'^\[FIELD:', content):
-                continue
-
-            # 移除其他可能的 [FIELD:...] 标记
-            content = re.sub(r'\[FIELD:[^\]]*\]', '', content)
 
             if table_idx < len(doc.tables):
                 table = doc.tables[table_idx]
@@ -272,50 +164,10 @@ def restore_docx_from_markdown(markdown_path, template_path, output_path):
                         cell = row.cells[cell_idx]
                         if para_idx < len(cell.paragraphs):
                             para = cell.paragraphs[para_idx]
-
-                            # 如果run存在且不包含域代码，修改文本
-                            if run_idx < len(para.runs) and not has_field_code(para.runs[run_idx]):
+                            if run_idx < len(para.runs):
+                                # 保留原始run，只修改文本
                                 para.runs[run_idx].text = content
                                 table_changes += 1
-
-        elif item['type'] == 'nested_table_cell':
-            table_idx = item['table_idx']
-            outer_row_idx = item['outer_row_idx']
-            outer_cell_idx = item['outer_cell_idx']
-            nested_idx = item['nested_idx']
-            nested_row_idx = item['nested_row_idx']
-            nested_cell_idx = item['nested_cell_idx']
-            para_idx = item['para_idx']
-            run_idx = item['run_idx']
-            content = item['content']
-            target_format = item.get('format', {})
-
-            # 如果内容是 [FIELD:...]，说明这是域代码，跳过
-            if re.match(r'^\[FIELD:', content):
-                continue
-
-            # 移除其他可能的 [FIELD:...] 标记
-            content = re.sub(r'\[FIELD:[^\]]*\]', '', content)
-
-            if table_idx < len(doc.tables):
-                outer_table = doc.tables[table_idx]
-                if outer_row_idx < len(outer_table.rows):
-                    outer_row = outer_table.rows[outer_row_idx]
-                    if outer_cell_idx < len(outer_row.cells):
-                        outer_cell = outer_row.cells[outer_cell_idx]
-                        if nested_idx < len(outer_cell.tables):
-                            nested_table = outer_cell.tables[nested_idx]
-                            if nested_row_idx < len(nested_table.rows):
-                                nested_row = nested_table.rows[nested_row_idx]
-                                if nested_cell_idx < len(nested_row.cells):
-                                    nested_cell = nested_row.cells[nested_cell_idx]
-                                    if para_idx < len(nested_cell.paragraphs):
-                                        para = nested_cell.paragraphs[para_idx]
-
-                                        # 如果run存在且不包含域代码，修改文本
-                                        if run_idx < len(para.runs) and not has_field_code(para.runs[run_idx]):
-                                            para.runs[run_idx].text = content
-                                            table_changes += 1
 
     # 保存文档
     doc.save(output_path)
