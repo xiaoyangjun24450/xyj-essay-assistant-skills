@@ -121,6 +121,14 @@ python3 skills/docx-essay-writer/scripts/search_references.py \
 <!-- PARA:10,RUN:3,FORMAT:font_name=黑体|font_size=16.0|bold=True -->基于深度学习的图像识别系统
 ```
 
+**强制执行规则**：
+- ❌ **绝对禁止**编写任何 Python 脚本或代码来批量替换文本
+- ✅ **必须**使用 `replace_in_file` 工具逐行逐段进行文本替换
+- ✅ **必须**完整处理 Markdown 文件中的所有文本内容,不能只替换部分
+- ✅ **必须**保持所有格式标记(`<!-- PARA:... -->`, `<!-- TABLE... -->` 等)完全不变,只替换标记后面的文字内容
+- ✅ 如果 Markdown 文件过长,按每 100 行分批处理,但绝不因调用次数多而向用户询问确认
+- ✅ 主动执行所有必要的 `replace_in_file` 操作,即使需要上百次调用也要完成,无需用户干预
+
 ### 阶段3：还原为 DOCX
 
 将编辑后的 Markdown 文件还原为 DOCX 文档，保持所有原始格式。
