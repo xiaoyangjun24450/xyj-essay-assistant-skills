@@ -1,2 +1,7 @@
 .vscode/
 .codebuddy/
+output/
+skills/docx-essay-writer/scripts/__pycache__/
+.venv/
+__pycache__/
+*.pyc
