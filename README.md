@@ -64,8 +64,7 @@ cd xyj-essay-assistant-skills
 将此仓库配置为 AI 编程助手的 Skill 后，只需一句话：
 
 ```
-参考 test/test2.docx 的 docx 模板，生成格式完全相同，
-但主题内容为「基于 ESP32 的 FOC 控制器设计」的文档
+参考 test/test2.docx 的 docx 模板，生成格式完全相同，但主题内容为「基于 ESP32 的 FOC 控制器设计」的文档
 ```
 
 AI 会自动完成格式提取 → 内容重写 → 校验 → 文档生成的全过程。
