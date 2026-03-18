@@ -1,0 +1,132 @@
+name: Build Windows Executable
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - feat/app
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller httpx
+
+      - name: Create PyInstaller spec file
+        run: |
+          # PyInstaller spec content
+          @'
+          block_cipher = None
+
+          a = Analysis(
+              ['app.py'],
+              pathex=['scripts'],
+              binaries=[],
+              datas=[('config.json', '.')],  # 打包配置文件到根目录
+              hiddenimports=[
+                  'httpx',
+                  'httpx._transports.default',
+                  'httpx._transports.urllib3',
+                  'docx_preprocessor',  # 确保打包这些模块
+                  'chunks_rewriter',
+                  'docx_chunks_restorer',
+              ],
+              hookspath=[],
+              hooksconfig={},
+              runtime_hooks=[],
+              excludes=[],
+              win_no_prefer_redirects=False,
+              win_private_assemblies=False,
+              cipher=block_cipher,
+              noarchive=False,
+          )
+
+          pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+          exe = EXE(
+              pyz,
+              a.scripts,
+              a.binaries,
+              a.zipfiles,
+              a.datas,
+              [],
+              name='essay-assistant',
+              debug=False,
+              bootloader_ignore_signals=False,
+              strip=False,
+              upx=True,
+              upx_exclude=[],
+              runtime_tmpdir=None,
+              console=True,  # 控制台应用，需要用户交互
+              disable_windowed_traceback=False,
+              argv_emulation=False,
+              target_arch=None,
+              codesign_identity=None,
+              entitlements_file=None,
+              icon=None,
+          )
+          '@ | Out-File -Encoding utf8 essay-assistant.spec
+        shell: pwsh
+
+      - name: Build executable with PyInstaller
+        run: |
+          pyinstaller essay-assistant.spec
+        shell: cmd
+
+      - name: Create release directory
+        run: |
+          mkdir release
+          copy dist\essay-assistant.exe release\
+          copy README.md release\
+          copy LICENSE release\
+          copy config.json release\
+        shell: cmd
+
+      - name: Create ZIP archive
+        run: Compress-Archive -Path release\* -DestinationPath essay-assistant-windows.zip
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: essay-assistant-windows
+          path: essay-assistant-windows.zip
+          retention-days: 30
+
+      - name: Generate Release Notes
+        id: release_notes
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          echo "tag=${GITHUB_REF#refs/tags/}" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: essay-assistant-windows.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -903,6 +903,8 @@ class DocxChunksRestorer:
                 for fn in files:
                     fp = os.path.join(root_d, fn)
                     arcname = os.path.relpath(fp, str(self.unzipped_dir))
+                    # 在 Windows 上，将反斜杠转换为正斜杠（ZIP 文件使用正斜杠）
+                    arcname = arcname.replace('\\', '/')
                     if arcname in override_files:
                         zf.writestr(arcname, override_files[arcname])
                     else:
