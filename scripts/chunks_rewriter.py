@@ -387,6 +387,8 @@ def run_rewrite(chunks_dir: str, chunks_new_dir: str, requirement: str):
     with ThreadPoolExecutor(max_workers=len(files)) as executor:
         futures = {}
         for filename in files:
+            import time
+            time.sleep(2)  # 每开一个线程前休眠2秒
             task = (chunks_dir, chunks_new_dir, filename, requirement, system_prompt, fix_prompt)
             future = executor.submit(process_chunk, task)
             futures[future] = filename
