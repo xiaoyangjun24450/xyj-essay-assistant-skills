@@ -53,48 +53,31 @@ def write_file(path: str, content: str) -> None:
 
 
 def load_system_prompt() -> str:
-    """Load rewrite system prompt."""
-    return """你是一个专业的学术论文改写助手。你的任务是对学术文本进行改写，同时保持其学术性和专业性。
+    """Load rewrite system prompt from file."""
+    if getattr(sys, 'frozen', False):
+        prompt_path = Path(sys.executable).parent / 'prompts' / 'system_prompt.txt'
+    else:
+        prompt_path = Path(__file__).parent.parent / 'prompts' / 'system_prompt.txt'
 
-## 改写原则
+    if not prompt_path.exists():
+        raise FileNotFoundError(f"系统提示词文件未找到: {prompt_path}")
 
-1. **保持原意** — 确保改写后的内容准确传达原文的核心思想和论点
-2. **学术风格** — 使用正式的学术语言，避免口语化表达
-3. **逻辑清晰** — 保持段落间的逻辑连贯性和论证结构
-4. **术语准确** — 正确使用学科专业术语
-
-## 格式要求
-
-1. **行数不变** — 每个 `[PARA_ID]` 对应一行，不能增删行
-2. **标记保留** — `[PARA_ID]` 标记必须原样保留，格式为 `[XXXXXXXX]`（8位十六进制）
-3. **格式标记保留** — 如果原文有 `<...>...</...>` 格式标记，新内容也要保留相同标记结构
-4. **公式保留** — 包含 `$...$` 的行：保留公式定界符和 LaTeX 语法
-5. **结构保持** — 标题依然是标题，正文依然是正文
-
-请直接输出改写后的内容，保持原有的行结构和格式。"""
+    with open(prompt_path, 'r', encoding='utf-8') as f:
+        return f.read().strip()
 
 
 def load_fix_prompt() -> str:
     """Load fix system prompt for correcting validation errors."""
-    return """你是一个专业的文本修复专家。你的任务是修复改写后的文本，使其满足以下约束条件。
+    if getattr(sys, 'frozen', False):
+        prompt_path = Path(sys.executable).parent / 'prompts' / 'fix_prompt.txt'
+    else:
+        prompt_path = Path(__file__).parent.parent / 'prompts' / 'fix_prompt.txt'
 
-## 约束（必须严格遵守）
+    if not prompt_path.exists():
+        raise FileNotFoundError(f"修复提示词文件未找到: {prompt_path}")
 
-1. **行数不变** — 每个 `[PARA_ID]` 对应一行，不能增删行
-2. **标记不变** — `[PARA_ID]` 标记必须原样保留，格式为 `[XXXXXXXX]`（8位十六进制）
-3. **格式标记保留** — 如果原文有 `<...>...</...>` 格式标记，新内容也要保留相同标记结构
-4. **公式保留** — 包含 `$...$` 的行：保留公式定界符和 LaTeX 语法
-5. **结构保持** — 标题依然是标题，正文依然是正文
-
-## 修复要求
-
-根据提供的错误信息，修复对应的问题行：
-- 如果缺少某一行，从原文复制该行
-- 如果 PARA_ID 不正确，修正为正确的 ID
-- 如果缺少 `<...>` 格式标记，从原文复制对应的标记结构
-- 如果标签未闭合或格式错误，修正标签
-
-请输出完整的修复后内容，保持原有的行结构和格式。"""
+    with open(prompt_path, 'r', encoding='utf-8') as f:
+        return f.read().strip()
 
 
 def extract_para_id(line: str) -> Optional[str]:
@@ -208,8 +191,11 @@ def validate_rewritten_content(
     return errors
 
 
-def call_llm_api(prompt: str, filename: str) -> str:
+def call_llm_api(prompt: str, filename: str, log_dir: str = None) -> str:
     """Send request to Moonshot API and return the response content."""
+    import json
+    from datetime import datetime
+
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json",
@@ -247,10 +233,40 @@ def call_llm_api(prompt: str, filename: str) -> str:
         finish_reason = choice.get("finish_reason", "unknown")
         raise ValueError(f"API 返回 content 为 None，finish_reason={finish_reason}，filename={filename}")
 
-    return choice["message"]["content"]
+    content = choice["message"]["content"]
+
+    # 保存请求日志
+    if log_dir:
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            log_filename = f"{filename}_{timestamp}.json"
+            log_path = Path(log_dir) / log_filename
+
+            log_data = {
+                "timestamp": timestamp,
+                "filename": filename,
+                "request": {
+                    "model": MODEL,
+                    "max_tokens": data["max_tokens"],
+                    "prompt": prompt,
+                },
+                "response": {
+                    "status_code": response.status_code,
+                    "content": content,
+                    "finish_reason": choice.get("finish_reason"),
+                    "usage": result.get("usage", {}),
+                }
+            }
+
+            with open(log_path, 'w', encoding='utf-8') as f:
+                json.dump(log_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"  ! 日志保存失败: {e}")
+
+    return content
 
 
-def rewrite_chunk(filename: str, content: str, requirement: str, system_prompt: str) -> str:
+def rewrite_chunk(filename: str, content: str, requirement: str, system_prompt: str, log_dir: str = None) -> str:
     """Call Moonshot API to rewrite a chunk."""
     # 将 system_prompt 和 user_prompt 合并到 user message 中
     prompt_parts = [
@@ -264,7 +280,7 @@ def rewrite_chunk(filename: str, content: str, requirement: str, system_prompt: 
     ]
     prompt = "\n".join(prompt_parts)
 
-    return call_llm_api(prompt, filename)
+    return call_llm_api(prompt, filename, log_dir)
 
 
 def fix_chunk_with_llm(
@@ -272,13 +288,14 @@ def fix_chunk_with_llm(
     original_content: str,
     rewritten_content: str,
     errors: List[Tuple[int, str, str]],
-    fix_prompt: str
+    fix_prompt: str,
+    log_dir: str = None
 ) -> str:
     """调用 LLM 修复校验错误"""
     error_details = []
     for line_num, error_type, error_msg in errors:
         error_details.append(f"- 第{line_num}行 [{error_type}]: {error_msg}")
-    
+
     prompt_parts = [
         fix_prompt,
         "",
@@ -292,11 +309,11 @@ def fix_chunk_with_llm(
         rewritten_content,
     ]
     prompt = "\n".join(prompt_parts)
-    
-    return call_llm_api(prompt, filename)
+
+    return call_llm_api(prompt, filename, log_dir)
 
 
-def process_chunk(args: tuple[str, str, str, str, str, str]) -> tuple[str, str | None]:
+def process_chunk(args: tuple[str, str, str, str, str, str, str]) -> tuple[str, str | None]:
     """Process a single chunk file.
 
     Args:
@@ -306,11 +323,12 @@ def process_chunk(args: tuple[str, str, str, str, str, str]) -> tuple[str, str |
         requirement: Rewrite requirement
         system_prompt: System prompt for rewriting
         fix_prompt: System prompt for fixing errors
+        log_dir: Directory for saving request logs
 
     Returns:
         (filename, error_message or None)
     """
-    chunks_dir, chunks_new_dir, filename, requirement, system_prompt, fix_prompt = args
+    chunks_dir, chunks_new_dir, filename, requirement, system_prompt, fix_prompt, log_dir = args
 
     try:
         # 读取原始文件
@@ -319,9 +337,9 @@ def process_chunk(args: tuple[str, str, str, str, str, str]) -> tuple[str, str |
         original_lines = content.strip().split('\n')
 
         # 调用 Moonshot API 重写
-        rewritten = rewrite_chunk(filename, content, requirement, system_prompt)
+        rewritten = rewrite_chunk(filename, content, requirement, system_prompt, log_dir)
 
-        # 校验并重试（最多3次）
+        # 校验并重试（最多10次）
         max_retries = 10
         for attempt in range(max_retries):
             rewritten_lines = rewritten.strip().split('\n')
@@ -340,7 +358,7 @@ def process_chunk(args: tuple[str, str, str, str, str, str]) -> tuple[str, str |
                 
                 # 调用 LLM 修复
                 rewritten = fix_chunk_with_llm(
-                    filename, content, rewritten, errors, fix_prompt
+                    filename, content, rewritten, errors, fix_prompt, log_dir
                 )
             else:
                 # 最后一次尝试仍然失败
@@ -363,10 +381,14 @@ def process_chunk(args: tuple[str, str, str, str, str, str]) -> tuple[str, str |
         return filename, str(e)
 
 
-def run_rewrite(chunks_dir: str, chunks_new_dir: str, requirement: str):
+def run_rewrite(chunks_dir: str, chunks_new_dir: str, requirement: str, log_dir: str = None):
     """运行改写流程（供外部调用）"""
     # 确保输出目录存在
     os.makedirs(chunks_new_dir, exist_ok=True)
+
+    # 创建日志目录
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
 
     # 获取 chunks 目录下的所有 .md 文件
     chunks_path = Path(chunks_dir)
@@ -389,7 +411,7 @@ def run_rewrite(chunks_dir: str, chunks_new_dir: str, requirement: str):
         for filename in files:
             import time
             time.sleep(2)  # 每开一个线程前休眠2秒
-            task = (chunks_dir, chunks_new_dir, filename, requirement, system_prompt, fix_prompt)
+            task = (chunks_dir, chunks_new_dir, filename, requirement, system_prompt, fix_prompt, log_dir)
             future = executor.submit(process_chunk, task)
             futures[future] = filename
 
@@ -411,16 +433,18 @@ def run_rewrite(chunks_dir: str, chunks_new_dir: str, requirement: str):
 
 
 def main():
-    if len(sys.argv) != 4:
-        print(f"用法: {sys.argv[0]} <chunks_dir> <chunks_new_dir> <requirement>")
+    if len(sys.argv) < 4 or len(sys.argv) > 5:
+        print(f"用法: {sys.argv[0]} <chunks_dir> <chunks_new_dir> <requirement> [log_dir]")
+        print(f"示例: {sys.argv[0]} output/chunks output/chunks_new \"请改写\" output/logs")
         sys.exit(1)
 
     chunks_dir = sys.argv[1]
     chunks_new_dir = sys.argv[2]
     requirement = sys.argv[3]
+    log_dir = sys.argv[4] if len(sys.argv) > 4 else None
 
     try:
-        run_rewrite(chunks_dir, chunks_new_dir, requirement)
+        run_rewrite(chunks_dir, chunks_new_dir, requirement, log_dir)
     except RuntimeError as e:
         print(f"错误: {e}")
         sys.exit(1)

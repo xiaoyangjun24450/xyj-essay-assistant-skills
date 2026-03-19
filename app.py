@@ -55,10 +55,12 @@ def main():
     # 5. 执行改写
     chunks_dir = work_dir / "chunks"
     chunks_new_dir = work_dir / "chunks_new"
+    logs_dir = work_dir / "logs"
     print("正在改写文档...")
     try:
-        run_rewrite(str(chunks_dir), str(chunks_new_dir), requirement)
+        run_rewrite(str(chunks_dir), str(chunks_new_dir), requirement, str(logs_dir))
         print(f"改写完成！输出目录: {chunks_new_dir}")
+        print(f"请求日志已保存到: {logs_dir}")
     except Exception as e:
         print(f"改写失败！错误: {e}")
         sys.exit(1)
