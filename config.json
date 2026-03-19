@@ -3,5 +3,7 @@
     "api_key": "sk-",
     "model": "kimi-k2.5",
     "base_url": "https://api.moonshot.cn/v1"
-  }
+  },
+  "concurrency": 10,
+  "chunk_max_chars": 1000
 }

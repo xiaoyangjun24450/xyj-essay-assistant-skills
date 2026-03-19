@@ -144,10 +144,13 @@ class DocxPreprocessor:
         # 存储每个段落的run信息（用于后续生成chunks）
         self.para_runs_data: Dict[str, List[Dict[str, Any]]] = {}  # para_id -> runs_data
 
-    def process(self, output_dir: str):
-        """执行预处理"""
+    def process(self, output_dir: str, max_chars: int = None):
+        """执行预处理。max_chars 为 None 时使用 1000（单 chunk 最大字数）。"""
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
+
+        if max_chars is None:
+            max_chars = 1000
 
         # 1. 解压docx到unzipped/
         unzipped_dir = output_path / 'unzipped'
@@ -165,7 +168,7 @@ class DocxPreprocessor:
 
         # 4. 生成chunks/
         chunks_dir = output_path / 'chunks'
-        self._generate_chunks(chunks_dir)
+        self._generate_chunks(chunks_dir, max_chars=max_chars)
 
         # 5. 生成每段落独立的format_registry.json
         self._generate_format_registries(output_path / 'format_registry.json', doc_hash)

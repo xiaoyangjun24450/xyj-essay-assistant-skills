@@ -192,23 +192,29 @@ def validate_rewritten_content(
 
 
 def call_llm_api(prompt: str, filename: str, log_dir: str = None) -> str:
-    """Send request to Moonshot API and return the response content."""
+    """Send request to Moonshot API and return the response content. 每次调用时从 config 读取最新 api 配置。"""
     import json
     from datetime import datetime
 
+    cfg = load_config()
+    api_cfg = cfg.get("api", {})
+    api_key = api_cfg.get("api_key") or API_KEY
+    model = api_cfg.get("model") or MODEL
+    base_url = api_cfg.get("base_url") or BASE_URL
+
     headers = {
-        "Authorization": f"Bearer {API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
 
     data = {
-        "model": MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 1024 * 32,
     }
 
     response = httpx.post(
-        f"{BASE_URL}/chat/completions",
+        f"{base_url.rstrip('/')}/chat/completions",
         headers=headers,
         json=data,
         timeout=240,
@@ -246,7 +252,7 @@ def call_llm_api(prompt: str, filename: str, log_dir: str = None) -> str:
                 "timestamp": timestamp,
                 "filename": filename,
                 "request": {
-                    "model": MODEL,
+                    "model": model,
                     "max_tokens": data["max_tokens"],
                     "prompt": prompt,
                 },
@@ -381,8 +387,8 @@ def process_chunk(args: tuple[str, str, str, str, str, str, str]) -> tuple[str, 
         return filename, str(e)
 
 
-def run_rewrite(chunks_dir: str, chunks_new_dir: str, requirement: str, log_dir: str = None):
-    """运行改写流程（供外部调用）"""
+def run_rewrite(chunks_dir: str, chunks_new_dir: str, requirement: str, log_dir: str = None, concurrency: int = None):
+    """运行改写流程（供外部调用）。concurrency 为 None 时从 config 读取，超过并发数时由线程池排队等待下一轮。"""
     # 确保输出目录存在
     os.makedirs(chunks_new_dir, exist_ok=True)
 
@@ -398,19 +404,21 @@ def run_rewrite(chunks_dir: str, chunks_new_dir: str, requirement: str, log_dir:
         print(f"警告: {chunks_dir} 目录下没有找到 .md 文件")
         return
 
-    print(f"找到 {len(files)} 个 chunk 文件，开始处理...")
+    if concurrency is None:
+        concurrency = _config.get("concurrency", 3)
+    concurrency = max(1, int(concurrency))
+
+    print(f"找到 {len(files)} 个 chunk 文件，并发数={concurrency}，开始处理...")
 
     # 加载提示词
     system_prompt = load_system_prompt()
     fix_prompt = load_fix_prompt()
 
-    # 多线程处理每个文件
+    # 多线程处理，限制并发数
     results = []
-    with ThreadPoolExecutor(max_workers=len(files)) as executor:
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = {}
         for filename in files:
-            import time
-            time.sleep(2)  # 每开一个线程前休眠2秒
             task = (chunks_dir, chunks_new_dir, filename, requirement, system_prompt, fix_prompt, log_dir)
             future = executor.submit(process_chunk, task)
             futures[future] = filename

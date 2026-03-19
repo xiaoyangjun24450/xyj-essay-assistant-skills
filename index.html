@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>论文改写助手</title>
+  <style>
+    :root { --bg: #1a1b26; --surface: #24283b; --text: #c0caf5; --muted: #565f89; --accent: #7aa2f7; --green: #9ece6a; --red: #f7768e; }
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 1rem 2rem; line-height: 1.5; }
+    h1 { font-size: 1.5rem; margin: 0 0 1rem; color: var(--accent); }
+    h2 { font-size: 1.1rem; margin: 1.25rem 0 0.5rem; color: var(--muted); }
+    section { background: var(--surface); border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+    label { display: block; margin-bottom: 0.25rem; color: var(--muted); font-size: 0.9rem; }
+    input[type="text"], input[type="number"], textarea { width: 100%; padding: 0.5rem 0.6rem; background: var(--bg); border: 1px solid var(--muted); border-radius: 6px; color: var(--text); font-size: 0.95rem; }
+    input[type="file"] { color: var(--text); }
+    textarea { min-height: 80px; resize: vertical; font-family: inherit; }
+    .row { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .row > * { flex: 1 1 200px; }
+    button { background: var(--accent); color: var(--bg); border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.95rem; }
+    button:hover { filter: brightness(1.1); }
+    button.secondary { background: var(--muted); }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .msg { margin-top: 0.75rem; padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.9rem; }
+    .msg.ok { background: rgba(158, 206, 106, 0.2); color: var(--green); }
+    .msg.err { background: rgba(247, 118, 142, 0.2); color: var(--red); }
+    .advanced { border-left: 3px solid var(--muted); padding-left: 1rem; }
+    #runStatus { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>论文改写助手</h1>
+
+  <section>
+    <h2>基本设置</h2>
+    <label>选择 Docx 文件</label>
+    <input type="file" id="docxFile" accept=".docx" style="padding:0.4rem 0">
+    <span id="docxFileName" style="color:var(--muted);font-size:0.9rem;margin-left:0.5rem"></span>
+    <label style="margin-top:0.75rem">改写需求（用户提示词）</label>
+    <textarea id="requirement" placeholder="请输入改写需求..."></textarea>
+  </section>
+
+  <section>
+    <h2>API 配置（config 三参数）</h2>
+    <div class="row">
+      <div>
+        <label>api_key</label>
+        <input type="text" id="apiKey" placeholder="API Key">
+      </div>
+      <div>
+        <label>model</label>
+        <input type="text" id="model" placeholder="例如: kimi-k2.5">
+      </div>
+      <div>
+        <label>base_url</label>
+        <input type="text" id="baseUrl" placeholder="例如: https://api.moonshot.cn/v1">
+      </div>
+    </div>
+    <button type="button" id="saveConfig">保存 API 配置</button>
+    <div id="configMsg" class="msg" style="display:none"></div>
+  </section>
+
+  <section>
+    <h2>系统提示词（改写用）</h2>
+    <textarea id="systemPrompt" placeholder="加载中..."></textarea>
+    <button type="button" id="saveSystemPrompt">保存系统提示词</button>
+    <div id="systemPromptMsg" class="msg" style="display:none"></div>
+  </section>
+
+  <section>
+    <h2>修复提示词（校验失败时用）</h2>
+    <textarea id="fixPrompt" placeholder="加载中..."></textarea>
+    <button type="button" id="saveFixPrompt">保存修复提示词</button>
+    <div id="fixPromptMsg" class="msg" style="display:none"></div>
+  </section>
+
+  <section class="advanced">
+    <h2>高级设置</h2>
+    <div class="row">
+      <div>
+        <label>并发数（超过则排队等待下一轮）</label>
+        <input type="number" id="concurrency" min="1" value="3">
+      </div>
+      <div>
+        <label>单 chunk 字数（拆分时每个 chunk 最大字数）</label>
+        <input type="number" id="chunkMaxChars" min="100" value="1000">
+      </div>
+    </div>
+    <button type="button" id="saveAdvanced">保存高级设置</button>
+    <div id="advancedMsg" class="msg" style="display:none"></div>
+  </section>
+
+  <section>
+    <h2>执行</h2>
+    <button type="button" id="runBtn">开始改写</button>
+    <div id="runStatus" class="msg" style="display:none"></div>
+  </section>
+
+  <script>
+    function showMsg(elId, text, isErr) {
+      var el = document.getElementById(elId);
+      el.textContent = text;
+      el.className = 'msg ' + (isErr ? 'err' : 'ok');
+      el.style.display = 'block';
+      if (elId !== 'runStatus') setTimeout(function() { el.style.display = 'none'; }, 3000);
+    }
+
+    function loadConfig() {
+      fetch('/api/config').then(function(r) { return r.json(); }).then(function(data) {
+        var api = data.api || {};
+        document.getElementById('apiKey').value = api.api_key || '';
+        document.getElementById('model').value = api.model || '';
+        document.getElementById('baseUrl').value = api.base_url || '';
+        document.getElementById('concurrency').value = data.concurrency != null ? data.concurrency : 3;
+        document.getElementById('chunkMaxChars').value = data.chunk_max_chars != null ? data.chunk_max_chars : 1000;
+      }).catch(function(e) { showMsg('configMsg', '加载配置失败: ' + e.message, true); });
+    }
+
+    function loadPrompts() {
+      fetch('/api/prompts/system').then(function(r) { return r.text(); }).then(function(t) {
+        document.getElementById('systemPrompt').value = t;
+      }).catch(function() { document.getElementById('systemPrompt').placeholder = '加载失败'; });
+      fetch('/api/prompts/fix').then(function(r) { return r.text(); }).then(function(t) {
+        document.getElementById('fixPrompt').value = t;
+      }).catch(function() { document.getElementById('fixPrompt').placeholder = '加载失败'; });
+    }
+
+    document.getElementById('saveConfig').onclick = function() {
+      var payload = {
+        api: {
+          api_key: document.getElementById('apiKey').value.trim(),
+          model: document.getElementById('model').value.trim(),
+          base_url: document.getElementById('baseUrl').value.trim()
+        }
+      };
+      fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        showMsg('configMsg', data.error ? data.error : '已保存', !!data.error);
+      }).catch(function(e) { showMsg('configMsg', '请求失败: ' + e.message, true); });
+    };
+
+    document.getElementById('saveSystemPrompt').onclick = function() {
+      var text = document.getElementById('systemPrompt').value;
+      fetch('/api/prompts/system', { method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: text })
+        .then(function(r) { return r.json(); }).then(function(data) {
+          showMsg('systemPromptMsg', data.error ? data.error : '已保存', !!data.error);
+        }).catch(function(e) { showMsg('systemPromptMsg', '请求失败: ' + e.message, true); });
+    };
+
+    document.getElementById('saveFixPrompt').onclick = function() {
+      var text = document.getElementById('fixPrompt').value;
+      fetch('/api/prompts/fix', { method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: text })
+        .then(function(r) { return r.json(); }).then(function(data) {
+          showMsg('fixPromptMsg', data.error ? data.error : '已保存', !!data.error);
+        }).catch(function(e) { showMsg('fixPromptMsg', '请求失败: ' + e.message, true); });
+    };
+
+    document.getElementById('saveAdvanced').onclick = function() {
+      var payload = {
+        concurrency: parseInt(document.getElementById('concurrency').value, 10) || 3,
+        chunk_max_chars: parseInt(document.getElementById('chunkMaxChars').value, 10) || 1000
+      };
+      fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        showMsg('advancedMsg', data.error ? data.error : '已保存', !!data.error);
+      }).catch(function(e) { showMsg('advancedMsg', '请求失败: ' + e.message, true); });
+    };
+
+    document.getElementById('docxFile').onchange = function() {
+      var name = this.files && this.files[0] ? this.files[0].name : '';
+      document.getElementById('docxFileName').textContent = name ? '已选: ' + name : '';
+    };
+
+    document.getElementById('runBtn').onclick = function() {
+      var fileInput = document.getElementById('docxFile');
+      var requirement = document.getElementById('requirement').value.trim();
+      var statusEl = document.getElementById('runStatus');
+      var btn = document.getElementById('runBtn');
+      if (!fileInput.files || !fileInput.files[0]) { showMsg('runStatus', '请用“选择 Docx 文件”选择要改写的文档', true); return; }
+      if (!requirement) { showMsg('runStatus', '请填写改写需求', true); return; }
+      btn.disabled = true;
+      statusEl.style.display = 'block';
+      statusEl.className = 'msg';
+      statusEl.textContent = '处理中，请勿关闭页面...';
+
+      var form = new FormData();
+      form.append('docx', fileInput.files[0]);
+      form.append('requirement', requirement);
+
+      fetch('/api/run', {
+        method: 'POST',
+        body: form
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        statusEl.className = 'msg ' + (data.ok ? 'ok' : 'err');
+        statusEl.textContent = data.ok ? data.message : (data.error || data.message);
+        btn.disabled = false;
+      }).catch(function(e) {
+        statusEl.className = 'msg err';
+        statusEl.textContent = '请求失败: ' + e.message;
+        btn.disabled = false;
+      });
+    };
+
+    loadConfig();
+    loadPrompts();
+  </script>
+</body>
+</html>

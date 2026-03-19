@@ -39,11 +39,12 @@ jobs:
           block_cipher = None
 
           a = Analysis(
-              ['app.py'],
+              ['server.py'],
               pathex=['scripts'],
               binaries=[],
               datas=[
                   ('config.json', '.'),  # 打包配置文件到根目录
+                  ('index.html', '.'),   # Web 界面
                   ('prompts/system_prompt.txt', 'prompts'),  # 打包提示词文件
                   ('prompts/fix_prompt.txt', 'prompts'),
               ],
@@ -104,6 +105,7 @@ jobs:
           copy README.md release\
           copy LICENSE release\
           copy config.json release\
+          copy index.html release\
           mkdir release\prompts
           copy prompts\system_prompt.txt release\prompts\
           copy prompts\fix_prompt.txt release\prompts\
