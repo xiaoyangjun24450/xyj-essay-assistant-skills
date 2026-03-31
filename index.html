@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>论文改写助手</title>
+  <title>Word写作排版助手</title>
   <style>
     :root { --bg: #1a1b26; --surface: #24283b; --text: #c0caf5; --muted: #565f89; --accent: #7aa2f7; --green: #9ece6a; --red: #f7768e; }
     * { box-sizing: border-box; }
@@ -26,18 +26,27 @@
     .msg.err { background: rgba(247, 118, 142, 0.2); color: var(--red); }
     .advanced { border-left: 3px solid var(--muted); padding-left: 1rem; }
     #runStatus { white-space: pre-wrap; }
+    .file-list { color: var(--muted); font-size: 0.9rem; margin-top: 0.4rem; white-space: pre-wrap; }
   </style>
 </head>
 <body>
   <h1>论文改写助手</h1>
 
   <section>
-    <h2>基本设置</h2>
-    <label>选择 Docx 文件</label>
+    <h2>格式模板</h2>
+    <label>上传 docx 模板</label>
     <input type="file" id="docxFile" accept=".docx" style="padding:0.4rem 0">
-    <span id="docxFileName" style="color:var(--muted);font-size:0.9rem;margin-left:0.5rem"></span>
-    <label style="margin-top:0.75rem">改写需求（用户提示词）</label>
-    <textarea id="requirement" placeholder="请输入改写需求..."></textarea>
+    <div id="docxFileName" class="file-list"></div>
+  </section>
+
+  <section>
+    <h2>写作任务</h2>
+    <label>任务说明</label>
+    <textarea id="requirement" placeholder="请输入写作任务..."></textarea>
+    <label style="margin-top:0.75rem">语料素材</label>
+    <input type="file" id="materialFiles" accept=".docx,.txt,.md" multiple style="padding:0.4rem 0">
+    <div style="color:var(--muted);font-size:0.9rem;margin-top:0.25rem">支持 `.docx`、`.txt`、`.md`，上传 docx 时会自动提取文字作为写作参考。</div>
+    <div id="materialsFileNames" class="file-list"></div>
   </section>
 
   <section>
@@ -60,14 +69,14 @@
     <div id="configMsg" class="msg" style="display:none"></div>
   </section>
 
-  <section>
+  <section hidden>
     <h2>系统提示词（改写用）</h2>
     <textarea id="systemPrompt" placeholder="加载中..."></textarea>
     <button type="button" id="saveSystemPrompt">保存系统提示词</button>
     <div id="systemPromptMsg" class="msg" style="display:none"></div>
   </section>
 
-  <section>
+  <section hidden>
     <h2>修复提示词（校验失败时用）</h2>
     <textarea id="fixPrompt" placeholder="加载中..."></textarea>
     <button type="button" id="saveFixPrompt">保存修复提示词</button>
@@ -92,7 +101,7 @@
 
   <section>
     <h2>执行</h2>
-    <button type="button" id="runBtn">开始改写</button>
+    <button type="button" id="runBtn">开始写作</button>
     <div id="runStatus" class="msg" style="display:none"></div>
   </section>
 
@@ -177,13 +186,19 @@
       document.getElementById('docxFileName').textContent = name ? '已选: ' + name : '';
     };
 
+    document.getElementById('materialFiles').onchange = function() {
+      var names = Array.prototype.map.call(this.files || [], function(file) { return file.name; });
+      document.getElementById('materialsFileNames').textContent = names.length ? ('已选 ' + names.length + ' 个文件:\n' + names.join('\n')) : '';
+    };
+
     document.getElementById('runBtn').onclick = function() {
       var fileInput = document.getElementById('docxFile');
+      var materialInput = document.getElementById('materialFiles');
       var requirement = document.getElementById('requirement').value.trim();
       var statusEl = document.getElementById('runStatus');
       var btn = document.getElementById('runBtn');
-      if (!fileInput.files || !fileInput.files[0]) { showMsg('runStatus', '请用“选择 Docx 文件”选择要改写的文档', true); return; }
-      if (!requirement) { showMsg('runStatus', '请填写改写需求', true); return; }
+      if (!fileInput.files || !fileInput.files[0]) { showMsg('runStatus', '请先上传格式模板 docx', true); return; }
+      if (!requirement) { showMsg('runStatus', '请填写写作任务', true); return; }
       btn.disabled = true;
       statusEl.style.display = 'block';
       statusEl.className = 'msg';
@@ -192,6 +207,9 @@
       var form = new FormData();
       form.append('docx', fileInput.files[0]);
       form.append('requirement', requirement);
+      Array.prototype.forEach.call(materialInput.files || [], function(file) {
+        form.append('materials', file);
+      });
 
       fetch('/api/run', {
         method: 'POST',

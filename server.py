@@ -6,11 +6,14 @@
 """
 
 import json
+import io
 import re
 import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse, unquote
+import xml.etree.ElementTree as ET
+import zipfile
 
 # 项目根目录
 if getattr(sys, 'frozen', False):
@@ -54,6 +57,76 @@ def save_prompt(name, content):
     path = get_prompts_dir() / f'{name}.txt'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding='utf-8')
+
+
+DOCX_NS = {
+    'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+}
+
+
+def extract_docx_text(docx_data):
+    try:
+        with zipfile.ZipFile(io.BytesIO(docx_data), 'r') as zip_ref:
+            doc_xml = zip_ref.read('word/document.xml')
+    except zipfile.BadZipFile as e:
+        raise ValueError('上传的 docx 文件无效') from e
+    except KeyError as e:
+        raise ValueError('docx 文件缺少 document.xml') from e
+
+    try:
+        root = ET.fromstring(doc_xml)
+    except ET.ParseError as e:
+        raise ValueError('docx 内容解析失败') from e
+
+    word_ns = DOCX_NS['w']
+    text_tag = f'{{{word_ns}}}t'
+    tab_tag = f'{{{word_ns}}}tab'
+    br_tags = {f'{{{word_ns}}}br', f'{{{word_ns}}}cr'}
+    paragraphs = []
+
+    for para in root.findall('.//w:p', DOCX_NS):
+        parts = []
+        for node in para.iter():
+            if node.tag == text_tag and node.text:
+                parts.append(node.text)
+            elif node.tag == tab_tag:
+                parts.append('\t')
+            elif node.tag in br_tags:
+                parts.append('\n')
+        para_text = ''.join(parts).strip()
+        if para_text:
+            paragraphs.append(para_text)
+
+    return '\n'.join(paragraphs).strip()
+
+
+def extract_material_text(filename, data):
+    ext = Path(filename).suffix.lower()
+    if ext == '.docx':
+        return extract_docx_text(data)
+    if ext not in {'.txt', '.md'}:
+        raise ValueError(f'语料素材仅支持 .docx、.txt、.md：{filename}')
+    return data.decode('utf-8-sig', errors='replace').strip()
+
+
+def merge_requirement_with_materials(requirement, material_texts):
+    valid_materials = [
+        {'name': item.get('name', ''), 'text': item.get('text', '').strip()}
+        for item in material_texts
+        if item.get('text', '').strip()
+    ]
+    if not valid_materials:
+        return requirement
+
+    prompt_parts = [requirement.strip(), "", "## 参考语料素材"]
+    for idx, item in enumerate(valid_materials, start=1):
+        prompt_parts.extend([
+            "",
+            f"### 素材{idx}：{item.get('name', f'素材{idx}')}",
+            item['text'],
+        ])
+
+    return "\n".join(prompt_parts).strip()
 
 
 def run_pipeline(docx_path: str, requirement: str):
@@ -198,8 +271,9 @@ class Handler(BaseHTTPRequestHandler):
     def api_run(self):
         try:
             content_type = self.headers.get('Content-Type', '')
+            material_texts = []
             if 'multipart/form-data' in content_type:
-                docx_path, requirement = self._parse_run_multipart(content_type)
+                docx_path, requirement, material_texts = self._parse_run_multipart(content_type)
             else:
                 data = self.read_body_json()
                 if not data:
@@ -212,12 +286,13 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
             if not requirement:
-                self.send_json({'ok': False, 'error': '请填写改写需求'}, 400)
+                self.send_json({'ok': False, 'error': '请填写写作任务'}, 400)
                 return
             if not docx_path:
-                self.send_json({'ok': False, 'error': '请选择要上传的 docx 文件'}, 400)
+                self.send_json({'ok': False, 'error': '请先上传格式模板 docx'}, 400)
                 return
 
+            requirement = merge_requirement_with_materials(requirement, material_texts)
             ok, message, output_path = run_pipeline(docx_path, requirement)
             self.send_json({
                 'ok': ok,
@@ -228,7 +303,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({'ok': False, 'error': str(e)}, 500)
 
     def _parse_run_multipart(self, content_type):
-        """解析 multipart/form-data（不依赖 cgi），保存上传的 docx，返回 (保存后的路径, requirement)。"""
+        """解析 multipart/form-data（不依赖 cgi），返回 (保存后的 docx 路径, requirement, material_texts)。"""
         import datetime
         # 取 boundary
         m = re.search(r'boundary=([^;\s]+)', content_type)
@@ -242,6 +317,7 @@ class Handler(BaseHTTPRequestHandler):
         parts = body.split(sep)
         requirement = ''
         docx_data, docx_filename = None, 'upload.docx'
+        material_texts = []
         for part in parts:
             if part.strip() in (b'', b'--'):
                 continue
@@ -263,15 +339,23 @@ class Handler(BaseHTTPRequestHandler):
             elif name == 'docx' and filename_m:
                 docx_filename = unquote(filename_m.group(1))
                 docx_data = value
+            elif name == 'materials' and filename_m:
+                material_filename = unquote(filename_m.group(1))
+                material_texts.append({
+                    'name': material_filename,
+                    'text': extract_material_text(material_filename, value),
+                })
         if not docx_data:
-            return None, requirement
+            return None, requirement, material_texts
+        if Path(docx_filename).suffix.lower() != '.docx':
+            raise ValueError('格式模板仅支持 .docx')
         safe_name = re.sub(r'[^\w\.\-]', '_', docx_filename)
         upload_dir = SCRIPT_DIR / 'output' / 'uploads'
         upload_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
         save_path = upload_dir / f'{timestamp}_{safe_name}'
         save_path.write_bytes(docx_data)
-        return str(save_path), requirement
+        return str(save_path), requirement, material_texts
 
     def log_message(self, format, *args):
         print(format % args)
