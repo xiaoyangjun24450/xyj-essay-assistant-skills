@@ -6,3 +6,4 @@ skills/docx-essay-writer/scripts/__pycache__/
 __pycache__/
 *.pyc
 .codex
+tests/

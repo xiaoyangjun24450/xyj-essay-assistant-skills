@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-docx预处理器：从docx生成unzipped、chunks和format_registry.json
+docx预处理器：从docx生成unzipped、full_paragraphs.txt和format_registry.json
 输入：docx文件
 输出：
   - unzipped/: docx解压后的原始结构
-  - chunks/: 每个chunk文件包含带[PARA_ID]标记的段落文字（带格式类别ID标签）
-  - origin_chunks/: chunks的备份
+  - full_paragraphs.txt: 每行一个带[PARA_ID]标记的段落全文（带格式类别ID标签）
   - format_registry.json: 格式类别注册表（类别ID -> 规范化rPr XML）
 
 新格式标记规则（格式类别注册 + ID 标签架构）：
@@ -18,6 +17,7 @@ docx预处理器：从docx生成unzipped、chunks和format_registry.json
 
 import hashlib
 import json
+import re
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -145,12 +145,9 @@ class DocxPreprocessor:
         self.para_runs_data: Dict[str, List[Dict[str, Any]]] = {}  # para_id -> runs_data
 
     def process(self, output_dir: str, max_chars: int = None):
-        """执行预处理。max_chars 为 None 时使用 1000（单 chunk 最大字数）。"""
+        """执行预处理。保留 max_chars 参数仅为兼容旧调用方。"""
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
-
-        if max_chars is None:
-            max_chars = 1000
 
         # 1. 解压docx到unzipped/
         unzipped_dir = output_path / 'unzipped'
@@ -166,16 +163,16 @@ class DocxPreprocessor:
         
         print(f"共处理 {len(self.para_format_data)} 个段落")
 
-        # 4. 生成chunks/
-        chunks_dir = output_path / 'chunks'
-        self._generate_chunks(chunks_dir, max_chars=max_chars)
+        # 4. 保存全文段落
+        full_paragraphs_path = output_path / 'full_paragraphs.txt'
+        self._save_full_paragraphs(full_paragraphs_path)
 
         # 5. 生成每段落独立的format_registry.json
         self._generate_format_registries(output_path / 'format_registry.json', doc_hash)
 
         print(f"处理完成！")
         print(f"  - unzipped/: {unzipped_dir}")
-        print(f"  - chunks/: {chunks_dir}")
+        print(f"  - full_paragraphs.txt: {full_paragraphs_path}")
         print(f"  - format_registry.json: {output_path / 'format_registry.json'}")
 
     def _compute_doc_hash(self) -> str:
@@ -200,16 +197,18 @@ class DocxPreprocessor:
 
         # 存储每个段落的格式数据
         self.para_format_data: Dict[str, Dict[str, Any]] = {}  # para_id -> {categories, baseline_id, runs_data, text}
+        used_para_ids: Set[str] = set()
 
-        for para in paragraphs:
-            para_id = para.get(f'{{{self.NS["w14"]}}}paraId', 'unknown')
+        for idx, para in enumerate(paragraphs):
+            para_id = self._normalize_para_id(
+                para.get(f'{{{self.NS["w14"]}}}paraId'),
+                idx,
+                used_para_ids,
+            )
             
             # 提取段落中的所有run格式
             runs_data = self._extract_run_formats_from_para(para)
-            
-            if not runs_data:
-                continue
-            
+
             # 为该段落收集格式类别
             para_categories: Dict[Tuple, Dict[str, Any]] = {}
             
@@ -233,37 +232,50 @@ class DocxPreprocessor:
                 
                 para_categories[key]['count'] += 1
             
-            if not para_categories:
-                continue
+            baseline_id = None
+            if para_categories:
+                # 为段落内格式分配ID，选择出现最多的作为基准
+                sorted_cats = sorted(
+                    para_categories.items(),
+                    key=lambda x: x[1]['count'],
+                    reverse=True
+                )
+                
+                for cat_idx, (key, data) in enumerate(sorted_cats):
+                    cat_id = f"F{cat_idx}"
+                    para_categories[key]['id'] = cat_id
+                
+                baseline_id = sorted_cats[0][1]['id']
             
-            # 为段落内格式分配ID，选择出现最多的作为基准
-            sorted_cats = sorted(
-                para_categories.items(),
-                key=lambda x: x[1]['count'],
-                reverse=True
-            )
-            
-            for idx, (key, data) in enumerate(sorted_cats):
-                cat_id = f"F{idx}"
-                para_categories[key]['id'] = cat_id
-            
-            baseline_id = sorted_cats[0][1]['id'] if sorted_cats else None
-            
-            # 生成段落文本
+            # 生成段落文本。空段落也要保留，用于后续段落覆盖校验。
             para_text = self._process_formatting_with_para_categories(runs_data, para_categories, baseline_id)
-            
-            if para_text.strip():
-                para_text = self._convert_to_latex(para_text)
-                self.para_format_data[para_id] = {
-                    'categories': para_categories,
-                    'baseline_id': baseline_id,
-                    'runs_data': runs_data,
-                    'text': para_text,
-                }
-                self.paragraphs.append({
-                    'para_id': para_id,
-                    'text': para_text
-                })
+            para_text = self._convert_to_latex(para_text)
+
+            self.para_format_data[para_id] = {
+                'categories': para_categories,
+                'baseline_id': baseline_id,
+                'runs_data': runs_data,
+                'text': para_text,
+            }
+            self.paragraphs.append({
+                'para_id': para_id,
+                'text': para_text
+            })
+
+    def _normalize_para_id(self, para_id: Optional[str], para_index: int, used_ids: Set[str]) -> str:
+        """归一化段落ID，确保为唯一的 8 位大写十六进制。"""
+        candidate = (para_id or '').strip().upper()
+        if re.fullmatch(r'[0-9A-F]{8}', candidate) and candidate not in used_ids:
+            used_ids.add(candidate)
+            return candidate
+
+        synthetic_id = para_index
+        while True:
+            candidate = f"{synthetic_id:08X}"
+            if candidate not in used_ids:
+                used_ids.add(candidate)
+                return candidate
+            synthetic_id += 1
 
     def _extract_run_formats_from_para(self, para) -> List[Dict[str, Any]]:
         """从段落中提取所有run的格式信息"""
@@ -612,66 +624,12 @@ class DocxPreprocessor:
             for child in elem:
                 self._extract_omml_text(child, parts)
 
-    def _generate_chunks(self, chunks_dir: Path, max_chars: int = 1000):
-        """生成chunks文件"""
-        chunks_dir.mkdir(parents=True, exist_ok=True)
-        
-        origin_chunks_dir = chunks_dir.parent / 'origin_chunks'
-        origin_chunks_dir.mkdir(parents=True, exist_ok=True)
-
-        chunk_idx = 0
-        current_chunk_lines = []
-        current_chunk_chars = 0
-
-        for para in self.paragraphs:
-            para_id = para['para_id']
-            text = para['text']
-            text_len = len(text)
-
-            if text_len > max_chars:
-                if current_chunk_lines:
-                    self._save_chunk(chunks_dir, chunk_idx, current_chunk_lines)
-                    chunk_idx += 1
-                    current_chunk_lines = []
-                    current_chunk_chars = 0
-
-                line = f"[{para_id}] {text}"
-                self._save_chunk(chunks_dir, chunk_idx, [line])
-                chunk_idx += 1
-                continue
-
-            if current_chunk_chars + text_len > max_chars:
-                if current_chunk_lines:
-                    self._save_chunk(chunks_dir, chunk_idx, current_chunk_lines)
-                    chunk_idx += 1
-                    current_chunk_lines = []
-                    current_chunk_chars = 0
-
-            line = f"[{para_id}] {text}"
-            current_chunk_lines.append(line)
-            current_chunk_chars += text_len
-
-        if current_chunk_lines:
-            self._save_chunk(chunks_dir, chunk_idx, current_chunk_lines)
-
-        self._copy_chunks_to_origin(chunks_dir, origin_chunks_dir)
-
-        print(f"已生成 {chunk_idx + 1} 个chunk文件")
-        print(f"  - chunks/: {chunks_dir}")
-        print(f"  - origin_chunks/: {origin_chunks_dir}")
-
-    def _copy_chunks_to_origin(self, chunks_dir: Path, origin_chunks_dir: Path):
-        """将chunks复制到origin_chunks目录"""
-        import shutil
-        for chunk_file in sorted(chunks_dir.glob('chunk_*.md')):
-            dest_file = origin_chunks_dir / chunk_file.name
-            shutil.copy2(chunk_file, dest_file)
-
-    def _save_chunk(self, chunks_dir: Path, idx: int, lines: List[str]):
-        """保存单个chunk文件"""
-        chunk_file = chunks_dir / f"chunk_{idx}.md"
-        with open(chunk_file, 'w', encoding='utf-8') as f:
+    def _save_full_paragraphs(self, output_path: Path):
+        """保存全文段落，每行一个带 PARA_ID 的段落。"""
+        lines = [f"[{para['para_id']}] {para['text']}" for para in self.paragraphs]
+        with open(output_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(lines))
+        print(f"已保存全文段落: {output_path}")
 
     def _generate_format_registries(self, output_path: Path, doc_hash: str):
         """生成每个段落独立的格式注册表JSON文件"""
@@ -706,15 +664,8 @@ class DocxPreprocessor:
 
 
 def main():
-    import sys
-
-    if len(sys.argv) < 2:
-        print("用法: python docx_preprocessor.py <docx文件> [输出目录]")
-        print("示例: python docx_preprocessor.py template.docx output/")
-        sys.exit(1)
-
-    docx_path = sys.argv[1]
-    output_dir = sys.argv[2] if len(sys.argv) > 2 else 'output'
+    docx_path = 'tests/input.docx'
+    output_dir = 'tests/阶段一输出'
 
     print(f"正在处理: {docx_path}")
     print(f"输出目录: {output_dir}")

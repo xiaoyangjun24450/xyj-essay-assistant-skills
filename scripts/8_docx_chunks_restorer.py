@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-docx_chunks_restorer.py - 从 chunks 和 format_registry.json 还原 DOCX
+8_docx_chunks_restorer.py - 从 chunks 和 format_registry.json 还原 DOCX
 
 根据 chunks/ 目录中的文本内容修改 unzipped/ 中的 document.xml，
 将修改后的内容重新打包成 docx 文件。
@@ -10,11 +10,10 @@ docx_chunks_restorer.py - 从 chunks 和 format_registry.json 还原 DOCX
 1. 公式（$...$ 或 $$...$$）使用 LatexToOmmlConverter 转换为 OMML
 2. 文字格式通过查找 format_registry.json 中的类别 ID 获取对应的 rPr XML
 
-用法:
-    python docx_chunks_restorer.py <unzipped_dir> <chunks_dir> <output_docx>
-
-示例:
-    python docx_chunks_restorer.py output/unzipped output/chunks restored.docx
+测试入口默认使用固定路径:
+    unzipped_dir = tests/阶段一输出/unzipped
+    chunks_dir = tests/阶段七输出
+    output_docx = tests/阶段八输出/restored.docx
 """
 
 import copy
@@ -686,7 +685,7 @@ class DocxChunksRestorer:
         self._converter = LatexToOmmlConverter()
         
         # 加载格式注册表
-        registry_path = self.chunks_dir.parent / 'format_registry.json'
+        registry_path = self.unzipped_dir.parent / 'format_registry.json'
         self._registry = FormatRegistry(registry_path)
 
     def restore(self, output_docx_path: str):
@@ -912,20 +911,15 @@ class DocxChunksRestorer:
 
 
 # ====================================================================
-# CLI
+# Fixed entrypoint
 # ====================================================================
 
 def main():
-    import sys
+    unzipped_dir = "tests/阶段一输出/unzipped"
+    chunks_dir = "tests/阶段七输出"
+    output_docx = "tests/阶段八输出/restored.docx"
 
-    if len(sys.argv) < 4:
-        print("用法: python docx_chunks_restorer.py <unzipped_dir> <chunks_dir> <output_docx>")
-        print("示例: python docx_chunks_restorer.py output/unzipped output/chunks restored.docx")
-        sys.exit(1)
-
-    unzipped_dir = sys.argv[1]
-    chunks_dir = sys.argv[2]
-    output_docx = sys.argv[3]
+    Path(output_docx).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
 
     restorer = DocxChunksRestorer(unzipped_dir, chunks_dir)
     restorer.restore(output_docx)

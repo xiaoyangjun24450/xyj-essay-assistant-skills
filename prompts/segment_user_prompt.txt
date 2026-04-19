@@ -1,0 +1,31 @@
+请分析下面这个模板窗口的语义分段结果。
+
+## 窗口信息
+- 当前窗口: 第 {window_index} / {total_windows} 窗
+- 单个 segment 长度上限: {max_segment_chars} 字
+
+## 上一个窗口最后一个 segment
+{previous_segment_json}
+
+## 必要前后文
+{context_hint}
+
+## 当前窗口段落
+{window_content}
+
+要求：
+- 按语义完整性分段，但单个 segment 不要超过 {max_segment_chars} 字。
+- 如果某个 segment 可能超长，优先在自然语义断点处分成多个 segment。
+- 保持 para_ids 原始顺序，完整覆盖当前窗口全部段落。
+- 如果提供了上一个窗口最后一个 segment，则当前窗口第一个 segment 必须先完整承接这些 para_ids。
+- 只输出 JSON 数组，不要输出其他内容。
+
+请直接输出 JSON 数组，格式如下：
+[
+  {{
+    "segment_id": "seg_temp_1",
+    "summary": "本分段的简要概述",
+    "purpose": "background",
+    "para_ids": ["AAAAAAAA", "BBBBBBBB"]
+  }}
+]

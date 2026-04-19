@@ -1,17 +1,17 @@
 name: Build Windows Executable
 
 on:
-  # push:
-  #   branches:
-  #     - main
-  #     - master
-  #     - feat/app
-  #   tags:
-  #     - 'v*'
-  # pull_request:
-  #   branches:
-  #     - main
-  #     - master
+  push:
+    branches:
+      - main
+      - master
+      - feat/app
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 jobs:
@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller httpx
+          pip install -r requirements.txt pyinstaller
 
       - name: Create PyInstaller spec file
         run: |
@@ -45,16 +45,22 @@ jobs:
               datas=[
                   ('config.json', '.'),  # 打包配置文件到根目录
                   ('index.html', '.'),   # Web 界面
-                  ('prompts/system_prompt.txt', 'prompts'),  # 打包提示词文件
-                  ('prompts/fix_prompt.txt', 'prompts'),
+                  ('prompts', 'prompts'),  # 打包全部提示词文件
               ],
               hiddenimports=[
-                  'httpx',
-                  'httpx._transports.default',
-                  'httpx._transports.urllib3',
-                  'docx_preprocessor',  # 确保打包这些模块
-                  'chunks_rewriter',
-                  'docx_chunks_restorer',
+                  'openai',
+                  'openai.resources',
+                  'openai.resources.chat',
+                  'openai.resources.chat.completions',
+                  '1_docx_preprocessor',
+                  '2_segment_analyzer',
+                  '3_segment_validator',
+                  '4_chunk_generator',
+                  '5_material_processor',
+                  '6_material_retriever',
+                  '7_chunks_rewriter',
+                  '8_docx_chunks_restorer',
+                  'pipeline_utils',
               ],
               hookspath=[],
               hooksconfig={},
@@ -106,9 +112,7 @@ jobs:
           copy LICENSE release\
           copy config.json release\
           copy index.html release\
-          mkdir release\prompts
-          copy prompts\system_prompt.txt release\prompts\
-          copy prompts\fix_prompt.txt release\prompts\
+          xcopy prompts release\prompts /E /I /Y
         shell: cmd
 
       - name: Create ZIP archive

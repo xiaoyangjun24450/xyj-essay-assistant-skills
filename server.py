@@ -7,6 +7,7 @@
 
 import json
 import io
+import importlib
 import re
 import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -129,14 +130,20 @@ def merge_requirement_with_materials(requirement, material_texts):
     return "\n".join(prompt_parts).strip()
 
 
-def run_pipeline(docx_path: str, requirement: str):
-    """在调用线程中执行预处理 -> 改写 -> 重建，返回 (success, message, output_path_or_error)。"""
+def run_pipeline(docx_path: str, requirement: str, material_paths=None):
+    """在调用线程中执行预处理 -> 分段 -> 切块 -> 检索改写 -> 重建。"""
     import datetime
-    from docx_preprocessor import DocxPreprocessor
-    from chunks_rewriter import run_rewrite
-    from docx_chunks_restorer import DocxChunksRestorer
+
+    DocxPreprocessor = importlib.import_module('1_docx_preprocessor').DocxPreprocessor
+    SegmentAnalyzer = importlib.import_module('2_segment_analyzer').SegmentAnalyzer
+    SegmentValidator = importlib.import_module('3_segment_validator').SegmentValidator
+    ChunkGenerator = importlib.import_module('4_chunk_generator').ChunkGenerator
+    MaterialProcessor = importlib.import_module('5_material_processor').MaterialProcessor
+    run_rewrite = importlib.import_module('7_chunks_rewriter').run_rewrite
+    DocxChunksRestorer = importlib.import_module('8_docx_chunks_restorer').DocxChunksRestorer
 
     docx_path = Path(docx_path).expanduser().resolve()
+    material_paths = [str(Path(path).expanduser().resolve()) for path in (material_paths or [])]
     if not docx_path.exists():
         return False, f'文件不存在: {docx_path}', None
 
@@ -148,14 +155,75 @@ def run_pipeline(docx_path: str, requirement: str):
         config = load_config()
         max_chars = config.get('chunk_max_chars', 1000)
         concurrency = config.get('concurrency', 3)
+        segment_max_window_chars = config.get('segment_max_window_chars', 8000)
+        material_segment_max_window_chars = config.get('material_segment_max_window_chars', 8000)
+        retrieval_limit = config.get('retrieval_limit', 3)
 
         processor = DocxPreprocessor(str(docx_path))
         processor.process(str(work_dir), max_chars=max_chars)
 
-        chunks_dir = work_dir / "chunks"
-        chunks_new_dir = work_dir / "chunks_new"
         logs_dir = work_dir / "logs"
-        run_rewrite(str(chunks_dir), str(chunks_new_dir), requirement, str(logs_dir), concurrency=concurrency)
+        stage2_logs_dir = logs_dir / "stage2"
+        stage3_logs_dir = logs_dir / "stage3"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        stage2_logs_dir.mkdir(parents=True, exist_ok=True)
+        stage3_logs_dir.mkdir(parents=True, exist_ok=True)
+
+        full_paragraphs_path = work_dir / "full_paragraphs.txt"
+        stage2_segments_path = work_dir / "template_segments.stage2.json"
+        stage3_segments_path = work_dir / "template_segments.json"
+        analyzer = SegmentAnalyzer(
+            full_paragraphs_path=str(full_paragraphs_path),
+            output_path=str(stage2_segments_path),
+            max_window_chars=segment_max_window_chars,
+            log_dir=str(stage2_logs_dir),
+        )
+        analyzer.analyze()
+
+        validator = SegmentValidator(
+            full_paragraphs_path=str(full_paragraphs_path),
+            input_segments_path=str(stage2_segments_path),
+            output_path=str(stage3_segments_path),
+            log_dir=str(stage3_logs_dir),
+        )
+        validator.run()
+
+        chunks_dir = work_dir / "chunks"
+        chunks_metadata_path = work_dir / "chunks_metadata.json"
+        chunk_generator = ChunkGenerator(
+            full_paragraphs_path=str(full_paragraphs_path),
+            segments_path=str(stage3_segments_path),
+            output_dir=str(chunks_dir),
+            metadata_path=str(chunks_metadata_path),
+            max_chars=max_chars,
+        )
+        chunk_generator.generate()
+
+        chunks_new_dir = work_dir / "chunks_new"
+        material_numbered_path = None
+        material_segments_path = None
+        if material_paths:
+            materials_dir = work_dir / "materials"
+            material_result = MaterialProcessor(
+                material_paths=material_paths,
+                output_dir=str(materials_dir),
+                max_window_chars=material_segment_max_window_chars,
+                log_dir=str(logs_dir),
+            ).process()
+            material_numbered_path = material_result["numbered_output_path"]
+            material_segments_path = material_result["segments_output_path"]
+
+        run_rewrite(
+            str(chunks_dir),
+            str(chunks_new_dir),
+            requirement,
+            str(logs_dir),
+            concurrency=concurrency,
+            chunks_metadata_path=str(chunks_metadata_path) if material_numbered_path else None,
+            material_numbered_path=material_numbered_path,
+            material_segments_path=material_segments_path,
+            retrieval_limit=retrieval_limit,
+        )
 
         output_docx = work_dir / "output.docx"
         restorer = DocxChunksRestorer(str(work_dir / "unzipped"), str(chunks_new_dir))
@@ -255,6 +323,10 @@ class Handler(BaseHTTPRequestHandler):
                 current['concurrency'] = int(data['concurrency'])
             if 'chunk_max_chars' in data:
                 current['chunk_max_chars'] = int(data['chunk_max_chars'])
+            if 'segment_max_window_chars' in data:
+                current['segment_max_window_chars'] = int(data['segment_max_window_chars'])
+            if 'material_segment_max_window_chars' in data:
+                current['material_segment_max_window_chars'] = int(data['material_segment_max_window_chars'])
             save_config(current)
             self.send_json({'ok': True})
         except Exception as e:
@@ -271,9 +343,9 @@ class Handler(BaseHTTPRequestHandler):
     def api_run(self):
         try:
             content_type = self.headers.get('Content-Type', '')
-            material_texts = []
+            material_paths = []
             if 'multipart/form-data' in content_type:
-                docx_path, requirement, material_texts = self._parse_run_multipart(content_type)
+                docx_path, requirement, material_paths = self._parse_run_multipart(content_type)
             else:
                 data = self.read_body_json()
                 if not data:
@@ -292,8 +364,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({'ok': False, 'error': '请先上传格式模板 docx'}, 400)
                 return
 
-            requirement = merge_requirement_with_materials(requirement, material_texts)
-            ok, message, output_path = run_pipeline(docx_path, requirement)
+            ok, message, output_path = run_pipeline(docx_path, requirement, material_paths=material_paths)
             self.send_json({
                 'ok': ok,
                 'message': message,
@@ -303,7 +374,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({'ok': False, 'error': str(e)}, 500)
 
     def _parse_run_multipart(self, content_type):
-        """解析 multipart/form-data（不依赖 cgi），返回 (保存后的 docx 路径, requirement, material_texts)。"""
+        """解析 multipart/form-data（不依赖 cgi），返回 (docx_path, requirement, material_paths)。"""
         import datetime
         # 取 boundary
         m = re.search(r'boundary=([^;\s]+)', content_type)
@@ -317,7 +388,7 @@ class Handler(BaseHTTPRequestHandler):
         parts = body.split(sep)
         requirement = ''
         docx_data, docx_filename = None, 'upload.docx'
-        material_texts = []
+        material_files = []
         for part in parts:
             if part.strip() in (b'', b'--'):
                 continue
@@ -341,12 +412,9 @@ class Handler(BaseHTTPRequestHandler):
                 docx_data = value
             elif name == 'materials' and filename_m:
                 material_filename = unquote(filename_m.group(1))
-                material_texts.append({
-                    'name': material_filename,
-                    'text': extract_material_text(material_filename, value),
-                })
+                material_files.append((material_filename, value))
         if not docx_data:
-            return None, requirement, material_texts
+            return None, requirement, []
         if Path(docx_filename).suffix.lower() != '.docx':
             raise ValueError('格式模板仅支持 .docx')
         safe_name = re.sub(r'[^\w\.\-]', '_', docx_filename)
@@ -355,7 +423,15 @@ class Handler(BaseHTTPRequestHandler):
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
         save_path = upload_dir / f'{timestamp}_{safe_name}'
         save_path.write_bytes(docx_data)
-        return str(save_path), requirement, material_texts
+
+        material_paths = []
+        for index, (material_filename, material_data) in enumerate(material_files, start=1):
+            safe_material_name = re.sub(r'[^\w\.\-]', '_', material_filename)
+            material_path = upload_dir / f'{timestamp}_material_{index:02d}_{safe_material_name}'
+            material_path.write_bytes(material_data)
+            material_paths.append(str(material_path))
+
+        return str(save_path), requirement, material_paths
 
     def log_message(self, format, *args):
         print(format % args)

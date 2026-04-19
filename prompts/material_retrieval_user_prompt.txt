@@ -1,0 +1,25 @@
+请为下面这个模板 chunk 检索最相关的素材段落，并生成改写大纲。
+
+## 改写任务
+{requirement}
+
+## 检索约束
+- 最多选择 {retrieval_limit} 个素材段落。
+- 优先选择与 chunk 主题、结构、论证意图最接近的素材。
+- 如果 chunk 是某个大 segment 的拆分片段，要结合 split 信息判断它在当前 section 中的位置。
+
+## 当前 chunk 的语义信息
+{chunk_metadata_json}
+
+## 当前 chunk 原文
+{chunk_content}
+
+## 全部素材 segments
+{material_segments_json}
+
+请直接输出 JSON 对象，格式如下：
+{{
+  "material_para_ids": ["1", "2"],
+  "outline": "先写什么，再写什么，最后写什么",
+  "reason": "说明这些素材为什么最匹配当前 chunk"
+}}

@@ -1,0 +1,24 @@
+请批量修复缺失或重复后待插回的段落。
+
+当前完整的 template_segments.json：
+{current_segments_json}
+
+待判断的 repair_items：
+{repair_items_json}
+
+每个 repair_item 都包含：
+1. 当前待处理段落 paragraph
+2. 它在原文中的前一个已存在段落 previous_paragraph
+3. 它在原文中的后一个已存在段落 next_paragraph
+4. 前后候选 segment
+5. 可选的 candidate_segment_ids
+6. 允许的 allowed_actions
+7. force_target_segment_id
+
+判断要求：
+1. 必须按 repair_items 的顺序逐个给出 decision
+2. 优先判断该段落是否应该并入某个已有候选 segment
+3. 只有在它明显应当独立成段时，才返回 create_new
+4. 如果某个 item 的前后邻居已经落在同一个 segment 中，不允许 create_new
+5. 不要修改其他 segment，也不要返回其他 para_id
+6. 只返回一个 JSON 数组

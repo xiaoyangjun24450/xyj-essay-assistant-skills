@@ -95,6 +95,16 @@
         <input type="number" id="chunkMaxChars" min="100" value="1000">
       </div>
     </div>
+    <div class="row">
+      <div>
+        <label>模板滑动窗口上下文长度</label>
+        <input type="number" id="segmentMaxWindowChars" min="100" value="8000">
+      </div>
+      <div>
+        <label>素材滑动窗口上下文长度</label>
+        <input type="number" id="materialSegmentMaxWindowChars" min="100" value="8000">
+      </div>
+    </div>
     <button type="button" id="saveAdvanced">保存高级设置</button>
     <div id="advancedMsg" class="msg" style="display:none"></div>
   </section>
@@ -122,6 +132,8 @@
         document.getElementById('baseUrl').value = api.base_url || '';
         document.getElementById('concurrency').value = data.concurrency != null ? data.concurrency : 3;
         document.getElementById('chunkMaxChars').value = data.chunk_max_chars != null ? data.chunk_max_chars : 1000;
+        document.getElementById('segmentMaxWindowChars').value = data.segment_max_window_chars != null ? data.segment_max_window_chars : 8000;
+        document.getElementById('materialSegmentMaxWindowChars').value = data.material_segment_max_window_chars != null ? data.material_segment_max_window_chars : 8000;
       }).catch(function(e) { showMsg('configMsg', '加载配置失败: ' + e.message, true); });
     }
 
@@ -170,7 +182,9 @@
     document.getElementById('saveAdvanced').onclick = function() {
       var payload = {
         concurrency: parseInt(document.getElementById('concurrency').value, 10) || 3,
-        chunk_max_chars: parseInt(document.getElementById('chunkMaxChars').value, 10) || 1000
+        chunk_max_chars: parseInt(document.getElementById('chunkMaxChars').value, 10) || 1000,
+        segment_max_window_chars: parseInt(document.getElementById('segmentMaxWindowChars').value, 10) || 8000,
+        material_segment_max_window_chars: parseInt(document.getElementById('materialSegmentMaxWindowChars').value, 10) || 8000
       };
       fetch('/api/config', {
         method: 'POST',
